@@ -1,0 +1,139 @@
+<h2>配色替换映射表</h2>
+<p class="subtitle">方案 A：逐组件直接替换，以下是每个变更点</p>
+
+<div class="section">
+  <h3>统一色板定义</h3>
+  <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+      <div style="width:56px;height:56px;border-radius:8px;background:#1A1A2E;border:1px solid rgba(255,255,255,0.1);"></div>
+      <div style="font-size:10px;color:#fff;font-weight:600;">#1A1A2E</div>
+      <div style="font-size:9px;color:#9ca3af;">底层/App</div>
+    </div>
+    <div style="color:#4b5563;padding-bottom:24px;">→</div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+      <div style="width:56px;height:56px;border-radius:8px;background:#2B2D3A;border:1px solid rgba(255,255,255,0.1);"></div>
+      <div style="font-size:10px;color:#fff;font-weight:600;">#2B2D3A</div>
+      <div style="font-size:9px;color:#9ca3af;">代码块/深层</div>
+    </div>
+    <div style="color:#4b5563;padding-bottom:24px;">→</div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+      <div style="width:56px;height:56px;border-radius:8px;background:#3B3F4F;border:1px solid rgba(255,255,255,0.1);"></div>
+      <div style="font-size:10px;color:#fff;font-weight:600;">#3B3F4F</div>
+      <div style="font-size:9px;color:#9ca3af;">卡片/容器</div>
+    </div>
+    <div style="color:#4b5563;padding-bottom:24px;">→</div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+      <div style="width:56px;height:56px;border-radius:8px;background:rgba(160,120,65,0.3);border:1px solid rgba(255,255,255,0.1);"></div>
+      <div style="font-size:10px;color:#fff;font-weight:600;">rgb(160,120,65)</div>
+      <div style="font-size:9px;color:#9ca3af;">输入框强调</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>替换映射：背景色</h3>
+  <div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.1);">
+          <th style="text-align:left;padding:8px;color:#9ca3af;">组件</th>
+          <th style="text-align:left;padding:8px;color:#9ca3af;">旧值</th>
+          <th style="text-align:center;padding:8px;color:#9ca3af;"></th>
+          <th style="text-align:left;padding:8px;color:#9ca3af;">新值</th>
+          <th style="text-align:left;padding:8px;color:#9ca3af;">预览</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:8px;color:#e5e7eb;">App 主容器</td>
+          <td style="padding:8px;color:#f87171;"><code>bg-neutral-900</code> (#171717)</td>
+          <td style="padding:8px;color:#6b7280;">→</td>
+          <td style="padding:8px;color:#34d399;"><code>bg-[#1A1A2E]</code></td>
+          <td style="padding:8px;"><div style="display:flex;gap:4px;"><div style="width:24px;height:24px;border-radius:4px;background:#171717;border:1px solid rgba(255,255,255,0.1);"></div><div style="color:#6b7280;">→</div><div style="width:24px;height:24px;border-radius:4px;background:#1A1A2E;border:1px solid rgba(255,255,255,0.1);"></div></div></td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:8px;color:#e5e7eb;">NewSessionModal</td>
+          <td style="padding:8px;color:#f87171;"><code>bg-[#2A2421]/95</code></td>
+          <td style="padding:8px;color:#6b7280;">→</td>
+          <td style="padding:8px;color:#34d399;"><code>bg-[#3B3F4F]/95</code></td>
+          <td style="padding:8px;"><div style="display:flex;gap:4px;"><div style="width:24px;height:24px;border-radius:4px;background:rgba(42,36,33,0.95);border:1px solid rgba(255,255,255,0.1);"></div><div style="color:#6b7280;">→</div><div style="width:24px;height:24px;border-radius:4px;background:rgba(59,63,79,0.95);border:1px solid rgba(255,255,255,0.1);"></div></div></td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:8px;color:#e5e7eb;">SessionWindow</td>
+          <td style="padding:8px;color:#f87171;"><code>bg-[#3A3D4A]/95</code></td>
+          <td style="padding:8px;color:#6b7280;">→</td>
+          <td style="padding:8px;color:#34d399;"><code>bg-[#3B3F4F]/95</code></td>
+          <td style="padding:8px;"><div style="display:flex;gap:4px;"><div style="width:24px;height:24px;border-radius:4px;background:rgba(58,61,74,0.95);border:1px solid rgba(255,255,255,0.1);"></div><div style="color:#6b7280;">→</div><div style="width:24px;height:24px;border-radius:4px;background:rgba(59,63,79,0.95);border:1px solid rgba(255,255,255,0.1);"></div></div></td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:8px;color:#e5e7eb;">SessionWindow 输入框</td>
+          <td style="padding:8px;color:#f87171;"><code>bg-[#9A6A45]/30</code></td>
+          <td style="padding:8px;color:#6b7280;">→</td>
+          <td style="padding:8px;color:#34d399;"><code>bg-[rgba(160,120,65,0.3)]</code></td>
+          <td style="padding:8px;"><div style="display:flex;gap:4px;"><div style="width:24px;height:24px;border-radius:4px;background:rgba(154,106,69,0.3);border:1px solid rgba(255,255,255,0.1);"></div><div style="color:#6b7280;">→</div><div style="width:24px;height:24px;border-radius:4px;background:rgba(160,120,65,0.3);border:1px solid rgba(255,255,255,0.1);"></div></div></td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:8px;color:#e5e7eb;">DiffModal</td>
+          <td style="padding:8px;color:#f87171;"><code>bg-[#2A2421]/95</code></td>
+          <td style="padding:8px;color:#6b7280;">→</td>
+          <td style="padding:8px;color:#34d399;"><code>bg-[#3B3F4F]/95</code></td>
+          <td style="padding:8px;"><div style="display:flex;gap:4px;"><div style="width:24px;height:24px;border-radius:4px;background:rgba(42,36,33,0.95);border:1px solid rgba(255,255,255,0.1);"></div><div style="color:#6b7280;">→</div><div style="width:24px;height:24px;border-radius:4px;background:rgba(59,63,79,0.95);border:1px solid rgba(255,255,255,0.1);"></div></div></td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:8px;color:#e5e7eb;">GitSidebar</td>
+          <td style="padding:8px;color:#f87171;"><code>bg-[#1A1512]/95</code></td>
+          <td style="padding:8px;color:#6b7280;">→</td>
+          <td style="padding:8px;color:#34d399;"><code>bg-[#2B2D3A]/95</code></td>
+          <td style="padding:8px;"><div style="display:flex;gap:4px;"><div style="width:24px;height:24px;border-radius:4px;background:rgba(26,21,18,0.95);border:1px solid rgba(255,255,255,0.1);"></div><div style="color:#6b7280;">→</div><div style="width:24px;height:24px;border-radius:4px;background:rgba(43,45,58,0.95);border:1px solid rgba(255,255,255,0.1);"></div></div></td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:8px;color:#e5e7eb;">TabView 左栏</td>
+          <td style="padding:8px;color:#f87171;"><code>bg-[#1A1512]/80</code></td>
+          <td style="padding:8px;color:#6b7280;">→</td>
+          <td style="padding:8px;color:#34d399;"><code>bg-[#2B2D3A]/80</code></td>
+          <td style="padding:8px;"><div style="display:flex;gap:4px;"><div style="width:24px;height:24px;border-radius:4px;background:rgba(26,21,18,0.8);border:1px solid rgba(255,255,255,0.1);"></div><div style="color:#6b7280;">→</div><div style="width:24px;height:24px;border-radius:4px;background:rgba(43,45,58,0.8);border:1px solid rgba(255,255,255,0.1);"></div></div></td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:8px;color:#e5e7eb;">TabView 右栏</td>
+          <td style="padding:8px;color:#f87171;"><code>bg-[#14100E]</code></td>
+          <td style="padding:8px;color:#6b7280;">→</td>
+          <td style="padding:8px;color:#34d399;"><code>bg-[#1A1A2E]</code></td>
+          <td style="padding:8px;"><div style="display:flex;gap:4px;"><div style="width:24px;height:24px;border-radius:4px;background:#14100E;border:1px solid rgba(255,255,255,0.1);"></div><div style="color:#6b7280;">→</div><div style="width:24px;height:24px;border-radius:4px;background:#1A1A2E;border:1px solid rgba(255,255,255,0.1);"></div></div></td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:8px;color:#e5e7eb;">BoardView 侧栏</td>
+          <td style="padding:8px;color:#f87171;"><code>bg-[#3A3D4A]/95</code></td>
+          <td style="padding:8px;color:#6b7280;">→</td>
+          <td style="padding:8px;color:#34d399;"><code>bg-[#3B3F4F]/95</code></td>
+          <td style="padding:8px;"><div style="display:flex;gap:4px;"><div style="width:24px;height:24px;border-radius:4px;background:rgba(58,61,74,0.95);border:1px solid rgba(255,255,255,0.1);"></div><div style="color:#6b7280;">→</div><div style="width:24px;height:24px;border-radius:4px;background:rgba(59,63,79,0.95);border:1px solid rgba(255,255,255,0.1);"></div></div></td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:8px;color:#e5e7eb;">代码块</td>
+          <td style="padding:8px;color:#f87171;"><code>bg-[#23252E]</code></td>
+          <td style="padding:8px;color:#6b7280;">→</td>
+          <td style="padding:8px;color:#34d399;"><code>bg-[#2B2D3A]</code></td>
+          <td style="padding:8px;"><div style="display:flex;gap:4px;"><div style="width:24px;height:24px;border-radius:4px;background:#23252E;border:1px solid rgba(255,255,255,0.1);"></div><div style="color:#6b7280;">→</div><div style="width:24px;height:24px;border-radius:4px;background:#2B2D3A;border:1px solid rgba(255,255,255,0.1);"></div></div></td>
+        </tr>
+        <tr>
+          <td style="padding:8px;color:#e5e7eb;">TopBar 下拉菜单</td>
+          <td style="padding:8px;color:#f87171;"><code>bg-[#2A2421]/95</code></td>
+          <td style="padding:8px;color:#6b7280;">→</td>
+          <td style="padding:8px;color:#34d399;"><code>bg-[#3B3F4F]/95</code></td>
+          <td style="padding:8px;"><div style="display:flex;gap:4px;"><div style="width:24px;height:24px;border-radius:4px;background:rgba(42,36,33,0.95);border:1px solid rgba(255,255,255,0.1);"></div><div style="color:#6b7280;">→</div><div style="width:24px;height:24px;border-radius:4px;background:rgba(59,63,79,0.95);border:1px solid rgba(255,255,255,0.1);"></div></div></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="section">
+  <h3>不变项</h3>
+  <ul style="color:#d1d5db;font-size:13px;line-height:2;">
+    <li><strong>边框:</strong> <code>border-white/10</code> 保持不变（已统一）</li>
+    <li><strong>Hover/Focus:</strong> <code>bg-white/5</code>, <code>bg-white/10</code> 等透明度叠加保持不变</li>
+    <li><strong>文字颜色:</strong> 白色/灰色体系不变</li>
+    <li><strong>功能色:</strong> blue/green/amber/red 状态色不变</li>
+    <li><strong>品牌渐变:</strong> LOGO 的 orange→rose 渐变不变</li>
+    <li><strong>Canvas 背景:</strong> 画布背景图/渐变由 <code>canvas-bg</code> CSS 类控制，需确认是否调整</li>
+  </ul>
+</div>

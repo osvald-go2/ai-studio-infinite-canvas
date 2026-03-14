@@ -1,0 +1,5 @@
+{
+  "name": "AI Studio Infinite Canvas",
+  "description": "An infinite canvas and Kanban board for managing multiple AI sessions (Claude, Codex, Gemini) concurrently.",
+  "requestFramePermissions": []
+}
