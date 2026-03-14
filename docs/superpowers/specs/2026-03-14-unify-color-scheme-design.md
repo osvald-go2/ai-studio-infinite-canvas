@@ -8,7 +8,7 @@
 
 The project has two conflicting background color families:
 - **Warm brown** (`#2A2421`, `#1A1512`, `#14100E`) — used by NewSessionModal, DiffModal, GitSidebar, TabView
-- **Cool gray-blue** (`#3A3D4A`, `#23252E`) — used by SessionWindow, BoardView sidebar, code blocks
+- **Cool gray-blue** (`#3A3D4A`, `#23252E`, `#1E2023`) — used by SessionWindow, BoardView sidebar, code blocks (including CodeBlock.tsx)
 
 This creates visual inconsistency, especially when NewSessionModal (brown) appears over the canvas alongside SessionWindow (gray-blue).
 
@@ -60,10 +60,15 @@ Supporting colors (unchanged):
 |-----|-----|
 | `bg-[#1A1512]/95` | `bg-[#2B2D3A]/95` |
 
+### CodeBlock.tsx
+| Old | New |
+|-----|-----|
+| `bg-[#1E2023]/80` | `bg-[#2B2D3A]/80` |
+
 ### TopBar.tsx
 | Old | New |
 |-----|-----|
-| `bg-[#2A2421]/95` (dropdown) | `bg-[#3B3F4F]/95` |
+| `bg-[#2A2421]/95` (all dropdown instances — project-switcher and search-results) | `bg-[#3B3F4F]/95` |
 
 ### TabView.tsx
 | Old | New |
