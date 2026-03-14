@@ -118,7 +118,7 @@ bg-[#9A6A45]/30
 ```
 with:
 ```
-bg-[rgba(160_120_65_0.3)]
+bg-[#A07841]/30
 ```
 
 - [ ] **Step 3: Replace code block background (line 373)**

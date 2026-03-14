@@ -21,7 +21,7 @@ Derived from a Claude.ai-style reference: neutral cool gray with warm amber inpu
 | Base | `#1A1A2E` | App root background, deepest layer |
 | Deep | `#2B2D3A` | Code blocks, sidebar backgrounds, secondary surfaces |
 | Card | `#3B3F4F` | All cards, modals, containers, session windows |
-| Input accent | `rgba(160_120_65_0.3)` | Input field backgrounds (warm amber) |
+| Input accent | `#A07841` at 30% opacity | Input field backgrounds (warm amber) |
 
 Supporting colors (unchanged):
 - Borders: `rgba(255,255,255,0.08)` to `rgba(255,255,255,0.1)`
@@ -47,7 +47,7 @@ Supporting colors (unchanged):
 | Old | New |
 |-----|-----|
 | `bg-[#3A3D4A]/95` | `bg-[#3B3F4F]/95` |
-| `bg-[#9A6A45]/30` | `bg-[rgba(160_120_65_0.3)]` |
+| `bg-[#9A6A45]/30` | `bg-[#A07841]/30` |
 | `bg-[#23252E]` | `bg-[#2B2D3A]` |
 
 ### DiffModal.tsx
