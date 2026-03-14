@@ -9,9 +9,8 @@ import { BoardView } from './components/BoardView';
 import { TabView } from './components/TabView';
 import { TopBar } from './components/TopBar';
 import { NewSessionModal } from './components/NewSessionModal';
-import { GitSidebar } from './components/GitSidebar';
-import { DiffModal } from './components/DiffModal';
-import { Session, SessionStatus, FileDiff } from './types';
+import { GitReviewPanel } from './components/git/GitReviewPanel';
+import { Session, SessionStatus } from './types';
 import { initialSessions } from './data';
 
 export default function App() {
@@ -22,7 +21,6 @@ export default function App() {
   
   // Git Review State
   const [reviewSessionId, setReviewSessionId] = useState<string | null>(null);
-  const [viewingFileDiff, setViewingFileDiff] = useState<FileDiff | null>(null);
 
   const handleCreateSession = (title: string, model: string, gitBranch: string, worktree: string, initialPrompt: string) => {
     const newSession: Session = {
@@ -48,8 +46,8 @@ export default function App() {
 
   const handleCommit = (message: string) => {
     if (reviewSessionId) {
-      setSessions(sessions.map(s => 
-        s.id === reviewSessionId ? { ...s, diff: null } : s
+      setSessions(sessions.map(s =>
+        s.id === reviewSessionId ? { ...s, diff: null, status: 'done' as const } : s
       ));
       setReviewSessionId(null);
     }
@@ -57,8 +55,8 @@ export default function App() {
 
   const handleDiscard = () => {
     if (reviewSessionId) {
-      setSessions(sessions.map(s => 
-        s.id === reviewSessionId ? { ...s, diff: null } : s
+      setSessions(sessions.map(s =>
+        s.id === reviewSessionId ? { ...s, diff: null, status: 'inprocess' as const } : s
       ));
       setReviewSessionId(null);
     }
@@ -119,21 +117,13 @@ export default function App() {
         onCreate={handleCreateSession} 
       />
 
-      <GitSidebar
+      <GitReviewPanel
         isOpen={!!reviewSessionId}
-        onClose={() => setReviewSessionId(null)}
         session={reviewSession}
+        onClose={() => setReviewSessionId(null)}
         onCommit={handleCommit}
         onDiscard={handleDiscard}
-        onViewFile={setViewingFileDiff}
       />
-
-      {viewingFileDiff && (
-        <DiffModal
-          file={viewingFileDiff}
-          onClose={() => setViewingFileDiff(null)}
-        />
-      )}
     </div>
   );
 }

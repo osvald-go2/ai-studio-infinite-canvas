@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, GitBranch, FolderGit2 } from 'lucide-react';
+import { X, GitBranch, FolderGit2, ChevronDown, MessageSquare, PenLine } from 'lucide-react';
 
 interface NewSessionModalProps {
   isOpen: boolean;
@@ -8,21 +8,27 @@ interface NewSessionModalProps {
 }
 
 const ClaudeIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M17.5 12.5L19 15L21.5 15.5L20 17.5L20.5 20L18 19L16 21L14.5 18.5L12 19L13.5 16.5L11.5 14.5L14 13.5L15.5 11L17.5 12.5Z" fill="currentColor" />
-    <path d="M6.5 11.5L5 9L2.5 8.5L4 6.5L3.5 4L6 5L8 3L9.5 5.5L12 5L10.5 7.5L12.5 9.5L10 10.5L8.5 13L6.5 11.5Z" fill="currentColor" />
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="#D4A27F" xmlns="http://www.w3.org/2000/svg">
+    <path d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"/>
   </svg>
 );
 
 const CodexIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v4h-2zm0 6h2v4h-2z"/>
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="#10A37F" xmlns="http://www.w3.org/2000/svg">
+    <path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.778-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855L13.104 8.364l2.02-1.164a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.41-.676zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zM8.306 12.863l-2.02-1.164a.08.08 0 0 1-.038-.057V6.074a4.5 4.5 0 0 1 7.376-3.454l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.361l2.602-1.503 2.603 1.5v3.005l-2.603 1.503-2.602-1.506z"/>
   </svg>
 );
 
 const GeminiIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M12 2C12 7.52285 16.4772 12 22 12C16.4772 12 12 16.4772 12 22C12 16.4772 7.52285 12 2 12C7.52285 12 12 7.52285 12 2Z" fill="currentColor"/>
+  <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="geminiGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#4285F4"/>
+        <stop offset="50%" stopColor="#9B72CB"/>
+        <stop offset="100%" stopColor="#D96570"/>
+      </linearGradient>
+    </defs>
+    <path fill="url(#geminiGrad)" d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"/>
   </svg>
 );
 
@@ -55,28 +61,28 @@ export function NewSessionModal({ isOpen, onClose, onCreate }: NewSessionModalPr
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
-      <div className="bg-[#3B3F4F]/95 backdrop-blur-2xl border border-white/10 rounded-[32px] w-full max-w-lg shadow-2xl overflow-hidden flex flex-col">
-        <div className="flex justify-between items-center p-6 border-b border-white/10 bg-black/20">
-          <h2 className="text-lg font-medium text-white">New Session</h2>
-          <button onClick={onClose} className="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-gray-400 hover:text-white transition-colors">
-            <X size={20} />
+      <div className="bg-[#3B3F4F]/80 backdrop-blur-2xl border border-white/[0.08] rounded-[24px] w-full max-w-xl shadow-2xl overflow-hidden flex flex-col">
+        <div className="flex justify-between items-center px-7 pt-7 pb-2">
+          <h2 className="text-xl font-semibold text-white">New Session</h2>
+          <button onClick={onClose} className="w-9 h-9 rounded-full bg-white/[0.06] hover:bg-white/10 flex items-center justify-center text-gray-500 hover:text-gray-300 transition-colors">
+            <X size={18} />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="p-8 space-y-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">Title</label>
+        <form onSubmit={handleSubmit} className="px-7 pb-7 pt-4 space-y-5">
+          <div className="relative">
+            <PenLine size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-blue-400 pointer-events-none" />
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full bg-black/20 border border-white/5 rounded-xl px-4 py-3 text-white outline-none focus:border-white/20 focus:bg-black/30 transition-all placeholder-gray-500"
-              placeholder="e.g., Database Migration"
+              className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-4 py-3.5 text-white outline-none focus:border-white/15 transition-all placeholder-gray-600 text-[15px]"
+              placeholder="Session title..."
               autoFocus
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-3">Model</label>
+            <label className="block text-[15px] font-medium text-white mb-3">Model</label>
             <div className="grid grid-cols-3 gap-3">
               {MODELS.map((m) => {
                 const Icon = m.icon;
@@ -86,69 +92,72 @@ export function NewSessionModal({ isOpen, onClose, onCreate }: NewSessionModalPr
                     key={m.id}
                     type="button"
                     onClick={() => setModel(m.id)}
-                    className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border transition-all ${
-                      isSelected 
-                        ? 'bg-white/10 border-white/20 text-white shadow-inner' 
-                        : 'bg-black/20 border-white/5 text-gray-400 hover:bg-white/5 hover:text-gray-200'
+                    className={`flex flex-col items-center justify-center gap-2.5 py-5 px-3 rounded-xl border transition-all ${
+                      isSelected
+                        ? 'bg-white/[0.08] border-white/[0.12] text-white'
+                        : 'bg-white/[0.02] border-white/[0.06] text-gray-500 hover:bg-white/[0.05] hover:text-gray-300'
                     }`}
                   >
                     <Icon />
-                    <span className="text-xs font-medium">{m.name}</span>
+                    <span className="text-[13px] font-medium">{m.name}</span>
                   </button>
                 );
               })}
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-1.5">
-                <GitBranch size={16} className="text-gray-500" /> Git Branch
-              </label>
-              <input
-                type="text"
+          <div className="grid grid-cols-2 gap-3">
+            <div className="relative">
+              <GitBranch size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-orange-400 pointer-events-none" />
+              <ChevronDown size={14} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+              <select
                 value={gitBranch}
                 onChange={(e) => setGitBranch(e.target.value)}
-                className="w-full bg-black/20 border border-white/5 rounded-xl px-4 py-3 text-white outline-none focus:border-white/20 focus:bg-black/30 transition-all text-sm placeholder-gray-500"
-                placeholder="e.g., main"
-              />
+                className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-9 py-3.5 text-white outline-none focus:border-white/15 transition-all text-[15px] appearance-none cursor-pointer"
+              >
+                <option value="main">main</option>
+                <option value="develop">develop</option>
+                <option value="feature">feature</option>
+                <option value="staging">staging</option>
+              </select>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-1.5">
-                <FolderGit2 size={16} className="text-gray-500" /> Worktree
-              </label>
+            <div className="relative">
+              <FolderGit2 size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-emerald-400 pointer-events-none" />
               <input
                 type="text"
                 value={worktree}
                 onChange={(e) => setWorktree(e.target.value)}
-                className="w-full bg-black/20 border border-white/5 rounded-xl px-4 py-3 text-white outline-none focus:border-white/20 focus:bg-black/30 transition-all text-sm placeholder-gray-500"
-                placeholder="e.g., default"
+                className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-4 py-3.5 text-white outline-none focus:border-white/15 transition-all text-[15px] placeholder-gray-600"
+                placeholder="Worktree path..."
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">Initial Prompt (初始提示词)</label>
-            <textarea
-              value={initialPrompt}
-              onChange={(e) => setInitialPrompt(e.target.value)}
-              className="w-full bg-black/20 border border-white/5 rounded-xl px-4 py-3 text-white outline-none focus:border-white/20 focus:bg-black/30 transition-all resize-none h-28 text-sm placeholder-gray-500 custom-scrollbar"
-              placeholder="Enter the initial prompt to send to the session..."
-            />
+            <label className="block text-[15px] font-medium text-white mb-3">Initial Prompt</label>
+            <div className="relative">
+              <MessageSquare size={16} className="absolute left-3.5 top-4 text-purple-400 pointer-events-none" />
+              <textarea
+                value={initialPrompt}
+                onChange={(e) => setInitialPrompt(e.target.value)}
+                className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-4 py-3.5 text-white outline-none focus:border-white/15 transition-all resize-none h-28 text-[15px] placeholder-gray-600 custom-scrollbar"
+                placeholder="Enter the initial prompt to send to the session..."
+              />
+            </div>
           </div>
 
-          <div className="pt-4 flex justify-end gap-3">
+          <div className="flex justify-end gap-3 pt-1">
             <button
               type="button"
               onClick={onClose}
-              className="px-6 py-2.5 rounded-xl text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+              className="px-5 py-2.5 rounded-xl text-sm font-medium text-gray-300 bg-white/[0.06] hover:bg-white/10 transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={!title.trim()}
-              className="px-6 py-2.5 rounded-xl text-sm font-medium bg-white/10 hover:bg-white/20 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-white/5 hover:border-white/10"
+              className="px-5 py-2.5 rounded-xl text-sm font-medium bg-white/[0.12] hover:bg-white/[0.18] text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Create Session
             </button>

@@ -3,6 +3,10 @@ import { Session } from '../types';
 import { SessionWindow } from './SessionWindow';
 import { ZoomIn, ZoomOut, Maximize, Hand, MousePointer2, Send } from 'lucide-react';
 
+const SESSION_WIDTH = 600;
+const SESSION_DEFAULT_HEIGHT = 700;
+const SESSION_MIN_HEIGHT = 100;
+
 export function CanvasView({ 
   sessions, 
   setSessions, 
@@ -31,9 +35,8 @@ export function CanvasView({
       const session = sessions.find(s => s.id === focusedSessionId);
       if (session) {
         const container = containerRef.current.getBoundingClientRect();
-        // Assuming session window is roughly 400px wide and 500px tall
-        const sessionWidth = 400;
-        const sessionHeight = 500;
+        const sessionWidth = SESSION_WIDTH;
+        const sessionHeight = session.height ?? SESSION_DEFAULT_HEIGHT;
         
         // Calculate new transform to center the session
         const newScale = 1; // Reset scale to 1 for better visibility
@@ -124,8 +127,8 @@ export function CanvasView({
       const maxY = Math.max(selectionBox.startY, y);
       
       const newSelectedIds = sessions.filter(session => {
-        const sessionWidth = 400; // approximate width of SessionWindow
-        const sessionHeight = 500; // approximate height of SessionWindow
+        const sessionWidth = SESSION_WIDTH;
+        const sessionHeight = session.height ?? SESSION_DEFAULT_HEIGHT;
         const sMinX = session.position.x;
         const sMaxX = session.position.x + sessionWidth;
         const sMinY = session.position.y;
@@ -311,25 +314,31 @@ export function CanvasView({
   );
 }
 
-function DraggableSession({ 
-  session, 
-  transformScale, 
+function DraggableSession({
+  session,
+  transformScale,
   isFocused,
   isSelected,
   onSelect,
-  updateSession, 
-  onOpenReview 
-}: { 
-  session: Session, 
-  transformScale: number, 
+  updateSession,
+  onOpenReview
+}: {
+  session: Session,
+  transformScale: number,
   isFocused?: boolean,
   isSelected?: boolean,
   onSelect?: (multi: boolean) => void,
-  updateSession: (s: Session) => void, 
-  onOpenReview: () => void 
+  updateSession: (s: Session) => void,
+  onOpenReview: () => void
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+
+  // Resize state
+  const [isResizing, setIsResizing] = useState(false);
+  const [resizeStartY, setResizeStartY] = useState(0);
+  const [resizeStartHeight, setResizeStartHeight] = useState(0);
+  const [animateHeight, setAnimateHeight] = useState(false);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -346,6 +355,7 @@ function DraggableSession({
     }
   };
 
+  // Drag movement
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (isDragging) {
@@ -374,13 +384,79 @@ function DraggableSession({
     };
   }, [isDragging, dragOffset, session, updateSession, transformScale]);
 
+  // Resize handlers
+  const handleResizeMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setIsResizing(true);
+    setResizeStartY(e.clientY / transformScale);
+    setResizeStartHeight(session.height ?? SESSION_DEFAULT_HEIGHT);
+  };
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const deltaY = e.clientY / transformScale - resizeStartY;
+      const newHeight = Math.max(SESSION_MIN_HEIGHT, resizeStartHeight + deltaY);
+      updateSession({ ...session, height: newHeight });
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing, resizeStartY, resizeStartHeight, session, updateSession, transformScale]);
+
+  // Header double-click: toggle collapse/expand
+  const handleHeaderDoubleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    window.getSelection()?.removeAllRanges();
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('input')) return;
+
+    const currentHeight = session.height ?? SESSION_DEFAULT_HEIGHT;
+    const fullHeight = session.prevHeight ?? SESSION_DEFAULT_HEIGHT;
+    const halfHeight = Math.max(SESSION_MIN_HEIGHT, Math.round(fullHeight / 2));
+    setAnimateHeight(true);
+    if (session.prevHeight && currentHeight <= halfHeight + 10) {
+      updateSession({ ...session, height: session.prevHeight, prevHeight: undefined });
+    } else {
+      updateSession({ ...session, height: halfHeight, prevHeight: currentHeight });
+    }
+    setTimeout(() => setAnimateHeight(false), 350);
+  };
+
+  const currentHeight = session.height ?? SESSION_DEFAULT_HEIGHT;
+
   return (
-    <div 
+    <div
       className={`session-container absolute transition-shadow duration-300 ${isFocused ? 'ring-4 ring-blue-500/50 rounded-2xl shadow-2xl shadow-blue-500/20' : ''} ${isSelected ? 'ring-2 ring-blue-400 rounded-2xl shadow-lg shadow-blue-500/20' : ''}`}
       style={{ left: session.position.x, top: session.position.y }}
       onMouseDown={handleMouseDown}
     >
-      <SessionWindow session={session} onUpdate={updateSession} onOpenReview={onOpenReview} />
+      <SessionWindow
+        session={session}
+        onUpdate={updateSession}
+        onOpenReview={onOpenReview}
+        height={currentHeight}
+        animateHeight={animateHeight}
+        onHeaderDoubleClick={handleHeaderDoubleClick}
+      />
+      {/* Resize handle */}
+      <div
+        className="absolute bottom-0 left-0 right-0 h-3 cursor-ns-resize group z-10"
+        onMouseDown={handleResizeMouseDown}
+      >
+        <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-12 h-1 rounded-full bg-white/0 group-hover:bg-white/30 transition-colors" />
+      </div>
     </div>
   );
 }

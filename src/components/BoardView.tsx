@@ -178,7 +178,9 @@ export function BoardView({
                 {sessions.filter(s => s.status === col.id).map(session => (
                   <div 
                     key={session.id}
-                    ref={el => cardRefs.current[session.id] = el}
+                    ref={el => {
+                      cardRefs.current[session.id] = el;
+                    }}
                     draggable
                     onDragStart={(e) => handleDragStart(e, session.id)}
                     onClick={() => setActiveSessionId(session.id)}
