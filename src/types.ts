@@ -14,11 +14,34 @@ export interface GitDiff {
   files: FileDiff[];
 }
 
+export type ContentBlock =
+  | { type: 'text'; content: string }
+  | { type: 'code'; code: string; language: string }
+  | { type: 'tool_call'; tool: string; args: string; description?: string; duration?: number; status: 'running' | 'done' | 'error' }
+  | { type: 'todolist'; items: TodoItem[] }
+  | { type: 'subagent'; agentId: string; task: string; status: 'launched' | 'working' | 'done' | 'error'; summary?: string; blocks?: ContentBlock[] }
+  | { type: 'askuser'; questions: AskUserQuestion[]; submitted?: boolean }
+  | { type: 'skill'; skill: string; args?: string; status: 'invoking' | 'done'; duration?: number };
+
+export interface AskUserQuestion {
+  id: string;
+  question: string;
+  options?: string[];
+  response?: string;
+}
+
+export interface TodoItem {
+  id: string;
+  label: string;
+  status: 'pending' | 'in_progress' | 'done';
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   type?: 'text' | 'input_required' | 'code';
+  blocks?: ContentBlock[];
 }
 
 export interface Session {
@@ -31,4 +54,6 @@ export interface Session {
   position: { x: number; y: number };
   messages: Message[];
   diff?: GitDiff | null;
+  height?: number;
+  prevHeight?: number;
 }

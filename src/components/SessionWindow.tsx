@@ -1,26 +1,30 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { X, Clock, Plus, MessageSquare, Send, Copy, ThumbsUp, ThumbsDown, ArrowUp, Square, Minus, Check, Pencil } from 'lucide-react';
-import { Session, Message } from '../types';
+import { Session, Message, ContentBlock } from '../types';
 import { generateMockDiff } from '../services/mockGit';
+import { MessageRenderer } from './message/MessageRenderer';
+import { STRUCTURED_MOCK_RESPONSES } from '../utils/mockResponses';
 
-const MOCK_RESPONSES = [
-  "好的，我来帮你分析一下这个问题。\n\n首先，我们需要理解整体架构。这个项目使用了 React 19 + TypeScript + Vite 的技术栈，采用组件化设计，状态通过 props 从 App.tsx 向下传递。\n\n主要的改动点包括：\n1. 修改组件的 props 接口\n2. 添加新的状态管理逻辑\n3. 更新样式以匹配设计稿\n\n让我开始实现这些变更。",
-  "我已经检查了代码库，发现了几个关键文件：\n\n```typescript\n// src/types.ts\nexport interface Session {\n  id: string;\n  title: string;\n  model: string;\n  status: SessionStatus;\n  messages: Message[];\n}\n```\n\n这个接口定义了 Session 的核心结构。我建议我们在此基础上扩展，添加必要的字段。\n\n接下来我会修改相关组件，确保类型安全和向后兼容。所有改动都经过了 TypeScript 类型检查。",
-  "任务完成！以下是本次修改的摘要：\n\n**修改的文件：**\n- `src/components/SessionWindow.tsx` — 添加了新功能\n- `src/types.ts` — 更新了类型定义\n\n**新增功能：**\n- 支持内联编辑\n- 自动保存机制\n- 键盘快捷键支持（Enter 保存，Escape 取消）\n\n**测试建议：**\n1. 验证编辑功能在各个视图模式下正常工作\n2. 测试边界情况（空字符串、超长文本）\n3. 确认拖拽交互不受影响\n\n如果有任何问题，随时告诉我！"
-];
+let mockResponseIndex = 0;
 
-export function SessionWindow({ 
-  session, 
-  onUpdate, 
-  onClose, 
+export function SessionWindow({
+  session,
+  onUpdate,
+  onClose,
   onOpenReview,
-  fullScreen = false
-}: { 
-  session: Session, 
-  onUpdate: (s: Session) => void, 
-  onClose?: () => void, 
+  fullScreen = false,
+  height,
+  animateHeight = false,
+  onHeaderDoubleClick
+}: {
+  session: Session,
+  onUpdate: (s: Session) => void,
+  onClose?: () => void,
   onOpenReview?: () => void,
-  fullScreen?: boolean
+  fullScreen?: boolean,
+  height?: number,
+  animateHeight?: boolean,
+  onHeaderDoubleClick?: (e: React.MouseEvent) => void
 }) {
   const [inputValue, setInputValue] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -55,38 +59,31 @@ export function SessionWindow({
     if (session.messages.length === 1 && session.messages[0].role === 'user' && !isStreamingRef.current) {
       const triggerInitialResponse = async () => {
         const aiMsgId = (Date.now() + 1).toString();
+        const mockResponse = STRUCTURED_MOCK_RESPONSES[mockResponseIndex++ % STRUCTURED_MOCK_RESPONSES.length];
+
         const aiMsg: Message = {
           id: aiMsgId,
           role: 'assistant',
           content: '',
-          type: 'text'
+          type: 'text',
+          blocks: []
         };
 
         const updatedMessages = [...session.messages, aiMsg];
-        
-        onUpdate({
+        const updatedSession = {
           ...session,
-          status: 'inprocess',
+          status: 'inprocess' as const,
           messages: updatedMessages
-        });
+        };
+
+        sessionRef.current = updatedSession;
+        onUpdate(updatedSession);
 
         setIsStreaming(true);
         setStreamingMessageId(aiMsgId);
         isStreamingRef.current = true;
 
-        const mockText = MOCK_RESPONSES[Math.floor(Math.random() * MOCK_RESPONSES.length)];
-          let currentText = '';
-          for (const char of mockText) {
-            if (!isStreamingRef.current) break;
-            currentText += char;
-            onUpdate({
-              ...sessionRef.current,
-              messages: sessionRef.current.messages.map(m =>
-                m.id === aiMsgId ? { ...m, content: currentText } : m
-              )
-            });
-            await new Promise(r => setTimeout(r, 20));
-          }
+        await streamBlockResponse(aiMsgId, mockResponse.blocks);
 
           setIsStreaming(false);
           setStreamingMessageId(null);
@@ -113,39 +110,32 @@ export function SessionWindow({
     };
 
     const aiMsgId = (Date.now() + 1).toString();
+    const mockResponse = STRUCTURED_MOCK_RESPONSES[mockResponseIndex++ % STRUCTURED_MOCK_RESPONSES.length];
+
     const aiMsg: Message = {
       id: aiMsgId,
       role: 'assistant',
       content: '',
-      type: 'text'
+      type: 'text',
+      blocks: []
     };
 
     const updatedMessages = [...sessionRef.current.messages, userMsg, aiMsg];
-    
-    onUpdate({
+    const updatedSession = {
       ...sessionRef.current,
-      status: 'inprocess',
+      status: 'inprocess' as const,
       messages: updatedMessages
-    });
+    };
+
+    sessionRef.current = updatedSession;
+    onUpdate(updatedSession);
 
     setInputValue('');
     setIsStreaming(true);
     setStreamingMessageId(aiMsgId);
     isStreamingRef.current = true;
 
-    const mockText = MOCK_RESPONSES[Math.floor(Math.random() * MOCK_RESPONSES.length)];
-    let currentText = '';
-    for (const char of mockText) {
-      if (!isStreamingRef.current) break;
-      currentText += char;
-      onUpdate({
-        ...sessionRef.current,
-        messages: sessionRef.current.messages.map(m =>
-          m.id === aiMsgId ? { ...m, content: currentText } : m
-        )
-      });
-      await new Promise(r => setTimeout(r, 20));
-    }
+    await streamBlockResponse(aiMsgId, mockResponse.blocks);
 
     setIsStreaming(false);
     setStreamingMessageId(null);
@@ -155,6 +145,51 @@ export function SessionWindow({
       status: 'review',
       diff: generateMockDiff()
     });
+  };
+
+  const streamBlockResponse = async (aiMsgId: string, blocks: ContentBlock[]) => {
+    const builtBlocks: ContentBlock[] = [];
+
+    for (const block of blocks) {
+      if (!isStreamingRef.current) break;
+
+      if (block.type === 'text') {
+        // Stream text character by character
+        let currentText = '';
+        const blockIndex = builtBlocks.length;
+        builtBlocks.push({ type: 'text', content: '' });
+
+        for (const char of block.content) {
+          if (!isStreamingRef.current) break;
+          currentText += char;
+          // Create new block object for each update so React detects the change
+          builtBlocks[blockIndex] = { type: 'text', content: currentText };
+          const newBlocks = [...builtBlocks];
+          const updated = {
+            ...sessionRef.current,
+            messages: sessionRef.current.messages.map(m =>
+              m.id === aiMsgId ? { ...m, content: currentText, blocks: newBlocks } : m
+            )
+          };
+          sessionRef.current = updated;
+          onUpdate(updated);
+          await new Promise(r => setTimeout(r, 15));
+        }
+      } else {
+        // Non-text blocks appear instantly
+        builtBlocks.push(block);
+        const newBlocks = [...builtBlocks];
+        const updated = {
+          ...sessionRef.current,
+          messages: sessionRef.current.messages.map(m =>
+            m.id === aiMsgId ? { ...m, blocks: newBlocks } : m
+          )
+        };
+        sessionRef.current = updated;
+        onUpdate(updated);
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
   };
 
   const handleStop = () => {
@@ -182,7 +217,8 @@ export function SessionWindow({
     setIsEditingTitle(false);
   };
 
-  const handleTitleDoubleClick = () => {
+  const handleTitleDoubleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
     setEditTitle(session.title);
     setIsEditingTitle(true);
   };
@@ -196,12 +232,14 @@ export function SessionWindow({
 
   return (
     <div className={`flex flex-col overflow-hidden text-sm text-gray-200 ${
-      fullScreen 
-        ? 'w-full h-full bg-transparent' 
-        : 'w-[600px] bg-[#3B3F4F]/95 backdrop-blur-3xl rounded-[32px] border border-white/10 shadow-2xl'
-    }`}>
+      fullScreen
+        ? 'w-full h-full bg-transparent'
+        : 'w-[600px] bg-[#3B3F4F]/90 backdrop-blur-3xl rounded-[32px] border border-white/10 shadow-2xl'
+    }`}
+    style={!fullScreen && height ? { height, transition: animateHeight ? 'height 0.3s cubic-bezier(0.4, 0, 0.2, 1)' : undefined } : undefined}
+    >
       {/* Header */}
-      <div className={`session-header flex items-center justify-between p-4 px-6 ${fullScreen ? 'border-b border-white/5 bg-black/20' : 'cursor-move'}`}>
+      <div className={`session-header flex items-center justify-between p-4 px-6 select-none ${fullScreen ? 'border-b border-white/5 bg-black/20' : 'cursor-move'}`} onDoubleClick={onHeaderDoubleClick}>
         <div className="flex items-center gap-3">
           {onClose && (
             <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors">
@@ -246,7 +284,7 @@ export function SessionWindow({
                 {session.title}
               </span>
               <button
-                onClick={(e) => { e.stopPropagation(); handleTitleDoubleClick(); }}
+                onClick={(e) => { e.stopPropagation(); handleTitleDoubleClick(e); }}
                 onMouseDown={(e) => e.stopPropagation()}
                 className="opacity-0 group-hover/title:opacity-100 text-gray-400 hover:text-white transition-opacity"
               >
@@ -264,7 +302,7 @@ export function SessionWindow({
       {/* Content */}
       <div 
         ref={scrollContainerRef}
-        className={`flex-1 overflow-y-auto custom-scrollbar ${fullScreen ? 'p-8' : 'p-6 pt-2 max-h-[600px]'}`}
+        className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar ${fullScreen ? 'p-8' : `p-6 pt-2${height ? '' : ' max-h-[600px]'}`}`}
       >
         <div className={`space-y-6 ${fullScreen ? 'max-w-4xl mx-auto w-full' : ''}`}>
           {session.id === '1' ? (
@@ -273,17 +311,22 @@ export function SessionWindow({
             <div className="space-y-6">
               {session.messages.map(msg => (
                 <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                  <div className={`max-w-[85%] ${
-                    msg.role === 'user' 
-                      ? 'bg-white/10 text-gray-200 rounded-3xl px-5 py-3.5' 
+                  <div className={`${
+                    msg.role === 'user'
+                      ? 'max-w-[85%] bg-white/10 text-gray-200 rounded-3xl px-5 py-3.5'
                       : 'text-gray-300 w-full'
                   }`}>
-                    <div className="whitespace-pre-wrap leading-relaxed text-[15px]">
-                      {msg.content}
-                      {isStreaming && streamingMessageId === msg.id && (
-                        <span className="inline-block w-1.5 h-3.5 ml-1 bg-current animate-pulse align-middle"></span>
-                      )}
-                    </div>
+                    {msg.role === 'user' ? (
+                      <div className="whitespace-pre-wrap leading-relaxed text-[15px]">
+                        {msg.content}
+                      </div>
+                    ) : (
+                      <MessageRenderer
+                        blocks={msg.blocks}
+                        fallbackContent={msg.content}
+                        isStreaming={isStreaming && streamingMessageId === msg.id}
+                      />
+                    )}
                   </div>
                 </div>
               ))}
@@ -293,7 +336,7 @@ export function SessionWindow({
       </div>
 
       {/* Bottom Input */}
-      <div className={`p-4 pb-6 ${fullScreen ? 'w-full max-w-4xl mx-auto' : 'px-6'}`}>
+      {!(height && height <= 110) && <div className={`p-4 pb-6 ${fullScreen ? 'w-full max-w-4xl mx-auto' : 'px-6'}`}>
         <div className={`bg-[#A07841]/30 backdrop-blur-xl rounded-[24px] p-2 flex flex-col gap-2 border border-white/10 shadow-xl focus-within:border-white/20 focus-within:ring-4 focus-within:ring-white/5 transition-all`}>
           <textarea 
             value={inputValue}
@@ -320,13 +363,12 @@ export function SessionWindow({
               
               {/* Review Button */}
               {session.status === 'review' && session.diff && (session.diff.totalAdditions > 0 || session.diff.totalDeletions > 0) && (
-                <button 
+                <button
                   onClick={onOpenReview}
-                  className="flex items-center gap-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 px-3 py-1.5 rounded-full text-xs font-medium transition-colors border border-blue-500/20"
+                  className="flex items-center gap-1 bg-white/[0.06] hover:bg-white/10 px-2 py-1 rounded-lg text-[11px] font-mono transition-colors border border-white/[0.06]"
                 >
-                  <span className="flex items-center"><Plus size={12} className="mr-0.5"/>{session.diff.totalAdditions}</span>
-                  <span className="flex items-center ml-1"><Minus size={12} className="mr-0.5"/>{session.diff.totalDeletions}</span>
-                  <span className="ml-1 text-blue-300">Review</span>
+                  <span className="text-green-400">+{session.diff.totalAdditions}</span>
+                  <span className="text-red-400">-{session.diff.totalDeletions}</span>
                 </button>
               )}
             </div>
@@ -348,7 +390,7 @@ export function SessionWindow({
             )}
           </div>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }
