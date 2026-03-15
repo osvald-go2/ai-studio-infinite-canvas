@@ -7,7 +7,7 @@
 ## 架构决策
 
 - **后端**：在现有 `ai-backend/` Rust sidecar 中新增 `git/` 模块，通过 JSON stdin/stdout IPC 协议暴露 `git.*` 系列方法
-- **AI commit**：创建临时 ClaudeProcess（不经过 SessionManager），流式返回 commit message，完成后立即 kill
+- **AI commit**：通过 SessionManager 创建临时（ephemeral）会话，流式返回 commit message，完成后立即 kill
 - **前端**：项目级别 git 管理，点击 session 切换工作目录上下文；新建 session 支持 worktree
 
 ---
@@ -37,7 +37,9 @@ ai-backend/src/
 | `git.changes` | `{dir}` | `FileChange[]` | `git status --porcelain` + 增删行数 |
 | `git.diff` | `{dir, file}` | `DiffOutput` | 单文件 diff hunks |
 | `git.stage_file` | `{dir, file}` | `{}` | `git add <file>` |
-| `git.commit` | `{dir, message}` | `{hash}` | stage all + commit |
+| `git.unstage_file` | `{dir, file}` | `{}` | `git reset HEAD -- <file>` |
+| `git.discard_file` | `{dir, file}` | `{}` | `git checkout -- <file>` (tracked) 或 `rm` (untracked) |
+| `git.commit` | `{dir, message}` | `{hash}` | `git add -A && git commit`（和 MuMu 一致，stage all） |
 | `git.branches` | `{dir}` | `BranchInfo[]` | 所有分支列表 |
 | `git.log` | `{dir, count}` | `CommitInfo[]` | commit 历史 |
 | `git.worktrees` | `{dir}` | `WorktreeInfo[]` | worktree 列表 |
@@ -56,6 +58,7 @@ struct GitInfo {
     commit_message: String,
     ahead: u32,
     behind: u32,
+    has_upstream: bool,
 }
 
 struct FileChange {
@@ -115,8 +118,8 @@ struct CommitFile {
 }
 
 struct BranchDiffStats {
-    additions: u32,
-    deletions: u32,
+    additions: u64,
+    deletions: u64,
     base_branch: String,
 }
 ```
@@ -128,20 +131,25 @@ struct BranchDiffStats {
 - `git.info` → `git rev-parse --abbrev-ref HEAD` + `git log -1 --format=%H%n%s` + `git rev-list --left-right --count HEAD...@{upstream}`
 - `git.changes` → `git status --porcelain` + 逐文件 `git diff --numstat`
 - `git.diff` → `git diff <file>`，解析为结构化 DiffHunk/DiffLine
-- `git.commit` → `git add -A && git commit -m "<message>"`
+- `git.unstage_file` → `git reset HEAD -- <file>`
+- `git.discard_file` → tracked: `git checkout -- <file>`，untracked: `std::fs::remove_file`
+- `git.commit` → `git add -A && git commit -m "<message>"`（和 MuMu 一致，总是 stage all）
 - `git.branches` → `git branch -a --format='%(refname:short)|%(HEAD)|%(upstream:short)|%(committerdate:relative)'`
 - `git.log` → `git log --oneline -<count> --format=%H|%s|%an|%aI --name-status`
 - `git.worktrees` → `git worktree list --porcelain`
-- `git.create_worktree` → `git worktree add .mumu/worktrees/<branch> -b <branch> <base>`
-- `git.merge_worktree` → `cd <wt_path> && git checkout <target> && git merge <branch>`
+- `git.create_worktree` → `git worktree add .ai-studio/worktrees/<branch> -b <branch> <base>`（处理三种情况：分支已有 worktree 返回现有路径、分支存在但无 worktree 则 attach、新分支则 -b 创建）
+- `git.merge_worktree` → `cd <wt_path> && git checkout <target> && git merge <branch>`（冲突时自动 `git merge --abort` 并返回错误）
 - `git.remove_worktree` → `git worktree remove <wt_path> && git branch -D <branch>`
 - `git.branch_diff_stats` → `git diff --stat <base_branch>...HEAD` + 统计 untracked 文件
 
 ### 1.5 AI Commit Message 实现
 
-`git.generate_commit_msg` 处理流程：
+`git.generate_commit_msg` 处理流程（参考 MuMu 的 `create_ephemeral_session` 模式）：
 
-1. Router 收到请求 → 直接创建临时 `ClaudeProcess`（不通过 SessionManager，不记录历史）
+1. Router 收到请求 → 通过 `SessionManager::create_ephemeral_session()` 创建临时会话
+   - Session ID 前缀 `"ephemeral-"` 标记为临时
+   - 不持久化到数据库，不记录消息历史
+   - 复用现有的 ClaudeProcess spawn、normalizer、event pipeline
 2. 构造 prompt：
    ```
    你是一个中文母语者。根据以下代码变更，生成一行简洁的 git commit message。
@@ -157,9 +165,18 @@ struct BranchDiffStats {
 
    {diff_text}
    ```
-3. 读取 Claude stdout 流 → 提取 assistant message 文本
-4. 通过 event channel 发送 `commit_msg_stream` 事件（`{text, done}`）
-5. 完成或超时(60s) → kill Claude 进程 → 清理资源
+3. 通过 `manager.send_message(&session_id, prompt)` 发送
+4. 监听 normalizer 输出，提取 assistant message 文本
+5. 通过 event channel 发送 `commit_msg_stream` 事件（`{text, done}`）
+6. 完成或超时(60s) → `manager.kill_session(&session_id)` → 清理资源
+
+**SessionManager 新增方法**：
+```rust
+impl SessionManager {
+    /// 创建不持久化的临时会话，用于 AI commit 等一次性任务
+    pub async fn create_ephemeral_session(&self, agent: String, working_dir: String) -> Result<String>;
+}
+```
 
 ---
 
@@ -202,6 +219,8 @@ export const git = {
 ```
 
 内部实现：Electron 模式调用 `backend.invoke('git.*', params)`，浏览器模式返回 mock 数据。
+
+**事件监听**：`commit_msg_stream` 事件需要在 `services/git.ts` 中直接通过 `window.aiBackend.on('commit_msg_stream', cb)` 注册，不走 `backend.ts` 的现有事件处理器。
 
 ### 2.3 Git 类型定义
 
@@ -274,17 +293,28 @@ src/components/git/
 
 ### 4.1 SessionWindow Review 按钮
 
-- AI 响应完成后 → `git.changes(workingDir)` 获取真实变更
-- 有变更：显示 review 按钮，status → `review`
+- AI 响应完成后（`onMessageComplete` 事件）→ 调用 `git.changes(workingDir)` 获取真实变更
+- 有变更：在 session 上设置 `hasChanges: true` + `changeCount: number`，显示 review 按钮
 - 无变更：不显示，保持 `inprocess`
 - 点击打开 GitReviewPanel
+
+**触发时机**：Review 按钮的状态由 `session.hasChanges` 驱动（替代原来的 `session.diff`），每次 AI 消息完成时刷新。
 
 ### 4.2 GitReviewPanel 数据源
 
 从 `session.diff`（mock）切换为实时 IPC：
 - 打开面板 → `git.changes(workingDir)` 获取文件列表
 - 点击文件 → `git.diff(workingDir, file)` 获取 hunk 数据
-- `Session.diff` 字段移除，每次实时获取
+- **`Session.diff` 字段移除**，替换为 `hasChanges: boolean` + `changeCount: number`（轻量标记）
+- 每次打开面板时实时获取完整数据
+
+### 4.5 刷新策略
+
+v1 采用手动/事件驱动刷新（不做文件监听）：
+- AI 消息完成后自动刷新 changes
+- commit 成功后自动刷新 changes + log
+- worktree 创建/删除后自动刷新 worktrees + branches
+- GitPanel 提供手动 refresh 按钮
 
 ### 4.3 NewSessionModal Worktree 支持
 
@@ -318,7 +348,7 @@ Frontend → invoke('git.generate_commit_msg') → Electron Main → stdin JSON 
 |------|------|
 | `services/mockGit.ts` | 保留，浏览器模式 fallback |
 | `SessionWindow.tsx` 中 `generateMockDiff()` | 替换为 `git.changes()` |
-| `Session.diff` 字段 | 移除 |
+| `Session.diff` 字段 | 移除，替换为 `hasChanges: boolean` + `changeCount: number` |
 | `GitSidebar.tsx` | 替换为 `GitPanel` |
 | `SourceControlPanel.tsx` mock commit graph | 替换为 `git.log()` |
 | `SourceControlPanel.tsx` generateCommitMessage | 替换为 IPC `git.generateCommitMsg` |
