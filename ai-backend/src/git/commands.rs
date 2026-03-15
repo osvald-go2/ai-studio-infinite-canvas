@@ -389,6 +389,24 @@ pub fn branches(dir: &str) -> Result<Vec<BranchInfo>, String> {
     Ok(result)
 }
 
+/// List all tracked files in the repository
+pub fn file_tree(dir: &str) -> Result<Vec<String>, String> {
+    let output = run_git(dir, &["ls-tree", "-r", "--name-only", "HEAD"])?;
+    Ok(output.lines().map(|l| l.to_string()).collect())
+}
+
+/// Read file content from git or working tree
+pub fn file_content(dir: &str, path: &str, git_ref: Option<&str>) -> Result<String, String> {
+    match git_ref {
+        Some(r) => run_git(dir, &["show", &format!("{}:{}", r, path)]),
+        None => {
+            let full_path = std::path::Path::new(dir).join(path);
+            std::fs::read_to_string(&full_path)
+                .map_err(|e| format!("Failed to read {}: {}", path, e))
+        }
+    }
+}
+
 /// Last `count` commits with file lists and branch labels.
 pub fn log(dir: &str, count: u32) -> Result<Vec<CommitInfo>, String> {
     // Build hash → branch name map
