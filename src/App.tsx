@@ -49,7 +49,6 @@ export default function App() {
       setSessions(sessions.map(s =>
         s.id === reviewSessionId ? { ...s, diff: null, status: 'done' as const } : s
       ));
-      setReviewSessionId(null);
     }
   };
 
@@ -58,7 +57,6 @@ export default function App() {
       setSessions(sessions.map(s =>
         s.id === reviewSessionId ? { ...s, diff: null, status: 'inprocess' as const } : s
       ));
-      setReviewSessionId(null);
     }
   };
 
@@ -86,7 +84,7 @@ export default function App() {
         onLocateSession={handleLocateSession}
       />
       
-      <div className="flex-1 relative z-10">
+      <div className="flex-1 min-h-0 relative z-10">
         {viewMode === 'canvas' ? (
           <CanvasView 
             sessions={sessions} 

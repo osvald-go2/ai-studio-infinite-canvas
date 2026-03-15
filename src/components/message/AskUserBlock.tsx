@@ -30,35 +30,35 @@ function QuestionPanel({
     <div>
       {/* Question text */}
       <div className="px-4 py-3">
-        <p className="text-sm text-amber-200">
-          <span className="text-amber-400/60 text-xs mr-2">{index + 1}/{total}</span>
+        <p className="text-sm text-gray-200">
+          <span className="text-gray-500 text-xs mr-2">{index + 1}/{total}</span>
           {q.question}
         </p>
       </div>
 
       {/* Options list */}
-      <div className="border-t border-amber-500/10">
+      <div className="border-t border-white/5">
         {q.options?.map((opt, i) => (
           <div
             key={i}
             onClick={() => setSelected(i)}
-            className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors border-b border-amber-500/10 last:border-b-0 ${
-              selected === i ? 'bg-amber-500/15' : 'hover:bg-amber-500/5'
+            className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors border-b border-white/5 last:border-b-0 ${
+              selected === i ? 'bg-white/[0.04]' : 'hover:bg-white/[0.02]'
             }`}
           >
             <span className={`w-5 h-5 rounded-full text-[11px] font-medium flex items-center justify-center shrink-0 ${
-              selected === i ? 'bg-amber-400 text-black' : 'bg-white/10 text-gray-400'
+              selected === i ? 'bg-violet-400 text-white' : 'bg-white/10 text-gray-400'
             }`}>
               {i + 1}
             </span>
-            <span className={`text-sm ${selected === i ? 'text-amber-200' : 'text-gray-300'}`}>{opt}</span>
+            <span className={`text-sm ${selected === i ? 'text-gray-200' : 'text-gray-300'}`}>{opt}</span>
           </div>
         ))}
 
         {/* Custom input row */}
         <div className="flex items-center gap-3 px-4 py-2.5">
           <span className={`w-5 h-5 rounded-full text-[11px] font-medium flex items-center justify-center shrink-0 ${
-            selected === (q.options?.length ?? 0) ? 'bg-amber-400 text-black' : 'bg-white/10 text-gray-400'
+            selected === (q.options?.length ?? 0) ? 'bg-violet-400 text-white' : 'bg-white/10 text-gray-400'
           }`}>
             {(q.options?.length ?? 0) + 1}
           </span>
@@ -74,7 +74,7 @@ function QuestionPanel({
           <button
             onClick={handleSubmitAnswer}
             disabled={selected === null && !customInput.trim()}
-            className="w-6 h-6 rounded-md bg-amber-500/25 hover:bg-amber-500/40 disabled:opacity-30 flex items-center justify-center text-amber-300 transition-colors shrink-0"
+            className="w-6 h-6 rounded-md bg-white/10 hover:bg-white/15 disabled:opacity-30 flex items-center justify-center text-gray-300 transition-colors shrink-0"
           >
             <ChevronRight size={13} />
           </button>
@@ -98,7 +98,6 @@ export function AskUserBlock({ questions, submitted }: AskUserData) {
 
   const handleAnswer = (qId: string, response: string) => {
     setAnswers(prev => ({ ...prev, [qId]: response }));
-    // Auto advance to next unanswered or stay on last
     if (currentTab < questions.length - 1) {
       setCurrentTab(currentTab + 1);
     }
@@ -111,8 +110,8 @@ export function AskUserBlock({ questions, submitted }: AskUserData) {
   // Submitted state: flat list of Q&A
   if (isSubmitted) {
     return (
-      <div className="rounded-xl border border-white/10 bg-white/5">
-        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/5">
+      <div className="rounded-xl border border-white/10 bg-white/[0.03] overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/5 bg-white/[0.02]">
           <Check size={14} className="text-green-400" />
           <span className="text-xs font-medium text-gray-400">已回复 {questions.length} 个问题</span>
         </div>
@@ -128,18 +127,18 @@ export function AskUserBlock({ questions, submitted }: AskUserData) {
     );
   }
 
-  // Active state: tab navigation
+  // Active state
   return (
-    <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 overflow-hidden">
-      {/* Header with icon */}
-      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-amber-500/10">
-        <MessageCircleQuestion size={15} className="text-amber-400" />
-        <span className="text-xs font-medium text-amber-300">需要你的回答</span>
+    <div className="rounded-xl border border-white/10 bg-white/[0.03] overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/5 bg-white/[0.02]">
+        <MessageCircleQuestion size={14} className="text-violet-400" />
+        <span className="text-xs font-medium text-gray-400">需要你的回答</span>
       </div>
 
       {/* Tab dots */}
       {questions.length > 1 && (
-        <div className="flex items-center gap-1.5 px-4 py-2 border-b border-amber-500/10">
+        <div className="flex items-center gap-1.5 px-4 py-2 border-b border-white/5">
           {questions.map((q, i) => {
             const isAnswered = !!answers[q.id];
             const isCurrent = i === currentTab;
@@ -149,7 +148,7 @@ export function AskUserBlock({ questions, submitted }: AskUserData) {
                 onClick={() => setCurrentTab(i)}
                 className={`h-1.5 rounded-full transition-all ${
                   isCurrent
-                    ? 'w-6 bg-amber-400'
+                    ? 'w-6 bg-violet-400'
                     : isAnswered
                       ? 'w-1.5 bg-green-400/60'
                       : 'w-1.5 bg-white/20'
@@ -171,10 +170,9 @@ export function AskUserBlock({ questions, submitted }: AskUserData) {
           onAnswer={(resp) => handleAnswer(questions[currentTab].id, resp)}
         />
       ) : (
-        // Already answered this one — show answer with option to re-answer
         <div className="px-4 py-3">
-          <p className="text-sm text-amber-200/70">
-            <span className="text-amber-400/60 text-xs mr-2">{currentTab + 1}/{questions.length}</span>
+          <p className="text-sm text-gray-300/70">
+            <span className="text-gray-500 text-xs mr-2">{currentTab + 1}/{questions.length}</span>
             {questions[currentTab]?.question}
           </p>
           <div className="flex items-center gap-2 mt-2">
@@ -182,7 +180,7 @@ export function AskUserBlock({ questions, submitted }: AskUserData) {
             <span className="text-sm text-gray-300">{answers[questions[currentTab]?.id]}</span>
             <button
               onClick={() => setAnswers(prev => { const next = { ...prev }; delete next[questions[currentTab].id]; return next; })}
-              className="text-[11px] text-amber-400/60 hover:text-amber-400 ml-auto transition-colors"
+              className="text-[11px] text-gray-500 hover:text-gray-300 ml-auto transition-colors"
             >
               重选
             </button>
@@ -190,12 +188,12 @@ export function AskUserBlock({ questions, submitted }: AskUserData) {
         </div>
       )}
 
-      {/* Submit button — only when all answered */}
+      {/* Submit button */}
       {allAnswered && (
-        <div className="border-t border-amber-500/10 px-4 py-2.5">
+        <div className="border-t border-white/5 px-4 py-2.5">
           <button
             onClick={handleSubmitAll}
-            className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-sm font-medium transition-colors"
+            className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-white/[0.04] hover:bg-white/[0.07] text-gray-300 text-sm font-medium transition-colors"
           >
             <Send size={13} />
             提交全部回答

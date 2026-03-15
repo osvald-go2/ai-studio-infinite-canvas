@@ -6,17 +6,19 @@ type SkillData = Extract<ContentBlock, { type: 'skill' }>;
 
 export function SkillBlock({ skill, args, status, duration }: SkillData) {
   return (
-    <div className="flex items-center gap-3 font-mono text-sm py-0.5">
-      <div className={`w-4 h-4 rounded-full flex items-center justify-center ${
-        status === 'done' ? 'bg-cyan-500/20 text-cyan-400' : 'bg-cyan-500/20 text-cyan-400'
-      }`}>
-        {status === 'done' ? <Check size={10} strokeWidth={3} /> : <Loader2 size={10} className="animate-spin" />}
+    <div className="rounded-xl border border-white/10 bg-white/[0.03] overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-2.5">
+        <div className={`w-4 h-4 rounded-full flex items-center justify-center ${
+          status === 'done' ? 'bg-green-500/20 text-green-500' : 'bg-violet-500/20 text-violet-400'
+        }`}>
+          {status === 'done' ? <Check size={10} strokeWidth={3} /> : <Loader2 size={10} className="animate-spin" />}
+        </div>
+        <Zap size={13} className="text-violet-400" />
+        <span className="text-xs font-medium text-gray-400">{skill}</span>
+        {args && <span className="text-xs text-gray-500 font-mono">{args}</span>}
+        {status === 'invoking' && <span className="text-violet-400/60 text-[11px] animate-pulse">invoking...</span>}
+        {duration != null && status === 'done' && <span className="text-xs text-gray-500 ml-auto">{duration}s</span>}
       </div>
-      <Zap size={14} className="text-cyan-400" />
-      <span className="text-cyan-400 font-medium">{skill}</span>
-      {args && <span className="text-gray-400">{args}</span>}
-      {status === 'invoking' && <span className="text-cyan-400/60 text-xs animate-pulse">invoking...</span>}
-      {duration != null && status === 'done' && <span className="text-gray-500 text-xs">{duration}s</span>}
     </div>
   );
 }

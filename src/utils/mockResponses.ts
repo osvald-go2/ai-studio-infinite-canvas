@@ -43,6 +43,13 @@ export const STRUCTURED_MOCK_RESPONSES: MockResponse[] = [
         { id: 'q2', question: '首选的状态管理方案？', options: ['Context API', 'Zustand', 'Jotai'] },
         { id: 'q3', question: '是否需要 SSR 支持？', options: ['是，使用 Next.js', '否，纯 SPA'] },
       ]},
+      { type: 'file_changes', title: '文件差异', files: [
+        { path: 'src/components/Feature.tsx', status: 'new' },
+        { path: 'src/components/App.tsx', status: 'modified' },
+        { path: 'src/utils/memoHelper.ts', status: 'new' },
+        { path: 'src/types.ts', status: 'modified' },
+        { path: 'src/legacy/OldFeature.tsx', status: 'deleted' },
+      ]},
       { type: 'text', content: '### 进展总结\n\n已完成核心功能实现：\n\n- **组件创建** — 新建了 Feature 组件\n- **性能优化** — 使用 `React.memo` 减少重渲染\n\n```typescript\nexport const Feature = React.memo(({ data }: Props) => {\n  return <div>{data.title}</div>;\n});\n```\n\n> 等待你的回复后继续下一步。' },
     ]
   },

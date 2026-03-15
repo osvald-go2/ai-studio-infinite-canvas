@@ -13,7 +13,7 @@ export function DiffSideBySide({ file }: DiffSideBySideProps) {
     if (!line) {
       return (
         <div className="px-3 py-0.5 min-h-[1.8em] bg-white/[0.02]">
-          <span className="text-transparent select-none mr-3 inline-block w-8 text-right font-mono text-xs">&nbsp;</span>
+          <span className="text-transparent select-none mr-3 inline-block w-8 text-right font-mono text-[13px]">&nbsp;</span>
         </div>
       );
     }
@@ -32,10 +32,10 @@ export function DiffSideBySide({ file }: DiffSideBySideProps) {
 
     return (
       <div className={`px-3 py-0.5 min-h-[1.8em] ${bgColor}`}>
-        <span className="text-gray-600 select-none mr-3 inline-block w-8 text-right font-mono text-xs">
+        <span className="text-gray-600 select-none mr-3 inline-block w-8 text-right font-mono text-[13px]">
           {line.lineNumber ?? ''}
         </span>
-        <span className={`font-mono text-xs ${textColor} whitespace-pre`}>{line.content}</span>
+        <span className={`font-mono text-[13px] ${textColor} whitespace-pre`}>{line.content}</span>
       </div>
     );
   };

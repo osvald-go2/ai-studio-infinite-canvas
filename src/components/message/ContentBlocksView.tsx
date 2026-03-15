@@ -6,6 +6,7 @@ import { TodoListBlock } from './TodoListBlock';
 import { SubagentBlock } from './SubagentBlock';
 import { AskUserBlock } from './AskUserBlock';
 import { SkillBlock } from './SkillBlock';
+import { FileChangesBlock } from './FileChangesBlock';
 import { CodeBlock } from '../CodeBlock';
 
 export function ContentBlocksView({
@@ -34,6 +35,8 @@ export function ContentBlocksView({
             return <AskUserBlock key={i} {...block} />;
           case 'skill':
             return <SkillBlock key={i} {...block} />;
+          case 'file_changes':
+            return <FileChangesBlock key={i} {...block} />;
           default:
             return null;
         }

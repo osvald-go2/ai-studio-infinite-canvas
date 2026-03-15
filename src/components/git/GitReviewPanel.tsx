@@ -73,9 +73,9 @@ export function GitReviewPanel({ isOpen, session, onClose, onCommit, onDiscard }
 
   return (
     <>
-      {/* Backdrop (transparent, click to close) */}
+      {/* Backdrop — 样式1: bg-black/50 */}
       <div
-        className={`fixed inset-0 z-40 transition-opacity duration-300 ease-in-out ${
+        className={`fixed inset-0 z-50 bg-black/50 transition-opacity duration-300 ease-in-out ${
           isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
         onClick={onClose}
@@ -87,7 +87,7 @@ export function GitReviewPanel({ isOpen, session, onClose, onCommit, onDiscard }
       }`}>
         {/* Diff Panel (left side, only when file selected) */}
         <div className={`transition-all duration-300 ease-out overflow-hidden ${
-          selectedFile ? 'w-[calc(100vw-700px)] min-w-[400px]' : 'w-0'
+          selectedFile ? 'w-[calc(100vw-420px)]' : 'w-0'
         }`}>
           {selectedFile && (
             <DiffPanel file={selectedFile} onClose={() => setSelectedFile(null)} />

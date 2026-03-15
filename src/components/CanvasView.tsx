@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Session } from '../types';
 import { SessionWindow } from './SessionWindow';
-import { ZoomIn, ZoomOut, Maximize, Hand, MousePointer2, Send } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize, Hand, MousePointer2, Send, Map } from 'lucide-react';
 
 const SESSION_WIDTH = 600;
 const SESSION_DEFAULT_HEIGHT = 700;
@@ -28,6 +28,36 @@ export function CanvasView({
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const [selectionBox, setSelectionBox] = useState<{ startX: number, startY: number, currentX: number, currentY: number } | null>(null);
   const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [showMinimap, setShowMinimap] = useState(true);
+
+  // Refs for group drag (avoid stale closures)
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  const selectedIdsRef = useRef(selectedSessionIds);
+  selectedIdsRef.current = selectedSessionIds;
+  const groupDragInitialPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
+
+  const handleGroupDragStart = useCallback(() => {
+    const positions: Record<string, { x: number; y: number }> = {};
+    for (const s of sessionsRef.current) {
+      if (selectedIdsRef.current.includes(s.id)) {
+        positions[s.id] = { x: s.position.x, y: s.position.y };
+      }
+    }
+    groupDragInitialPositionsRef.current = positions;
+  }, []);
+
+  const handleGroupDragMove = useCallback((deltaX: number, deltaY: number) => {
+    const initials = groupDragInitialPositionsRef.current;
+    if (Object.keys(initials).length === 0) return;
+    setSessions((prev: Session[]) => prev.map(s => {
+      const init = initials[s.id];
+      if (init) {
+        return { ...s, position: { x: init.x + deltaX, y: init.y + deltaY } };
+      }
+      return s;
+    }));
+  }, [setSessions]);
 
   // Handle focusing on a specific session
   useEffect(() => {
@@ -195,12 +225,16 @@ export function CanvasView({
         }}
       >
         {sessions.map(session => (
-          <DraggableSession 
-            key={session.id} 
-            session={session} 
+          <DraggableSession
+            key={session.id}
+            session={session}
             transformScale={transform.scale}
             isFocused={focusedSessionId === session.id}
             isSelected={selectedSessionIds.includes(session.id)}
+            toolMode={toolMode}
+            isGroupDrag={selectedSessionIds.includes(session.id) && selectedSessionIds.length > 1}
+            onGroupDragStart={handleGroupDragStart}
+            onGroupDragMove={handleGroupDragMove}
             onSelect={(multi) => {
               if (toolMode === 'select') {
                 if (multi) {
@@ -291,8 +325,18 @@ export function CanvasView({
         </div>
       </div>
 
+      {/* Minimap */}
+      {showMinimap && sessions.length > 0 && (
+        <CanvasMinimap
+          sessions={sessions}
+          transform={transform}
+          containerRef={containerRef}
+          onNavigate={setTransform}
+        />
+      )}
+
       {/* Zoom Controls */}
-      <div 
+      <div
         className="absolute bottom-6 right-6 flex items-center gap-2 bg-black/40 backdrop-blur-md p-2 rounded-xl border border-white/10 z-50 cursor-default ui-overlay"
         onMouseDown={e => e.stopPropagation()}
       >
@@ -309,7 +353,243 @@ export function CanvasView({
         <button onClick={handleResetZoom} className="p-1.5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors" title="Reset View">
           <Maximize size={18} />
         </button>
+        <div className="w-px h-4 bg-white/10 mx-1" />
+        <button
+          onClick={() => setShowMinimap(v => !v)}
+          className={`p-1.5 rounded-lg transition-colors ${showMinimap ? 'bg-blue-500/30 text-blue-300' : 'text-gray-300 hover:bg-white/10'}`}
+          title="Toggle Minimap"
+        >
+          <Map size={18} />
+        </button>
       </div>
+    </div>
+  );
+}
+
+// --- Minimap ---
+
+const MINIMAP_WIDTH = 200;
+const MINIMAP_HEIGHT = 140;
+const MINIMAP_PADDING = 60;
+const NAVIGATION_MARGIN = 300;
+
+const MODEL_COLORS: Record<string, string> = {
+  claude: '#a78bfa',
+  codex: '#34d399',
+  gemini: '#60a5fa',
+};
+
+function CanvasMinimap({
+  sessions,
+  transform,
+  containerRef,
+  onNavigate,
+}: {
+  sessions: Session[];
+  transform: { x: number; y: number; scale: number };
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  onNavigate: (t: { x: number; y: number; scale: number }) => void;
+}) {
+  const minimapRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const transformRef = useRef(transform);
+  transformRef.current = transform;
+
+  // Compute content bounds (bounding box of all sessions)
+  const contentBounds = useMemo(() => {
+    if (sessions.length === 0) return { minX: 0, minY: 0, maxX: 1000, maxY: 800 };
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const s of sessions) {
+      minX = Math.min(minX, s.position.x);
+      minY = Math.min(minY, s.position.y);
+      maxX = Math.max(maxX, s.position.x + SESSION_WIDTH);
+      maxY = Math.max(maxY, s.position.y + (s.height ?? SESSION_DEFAULT_HEIGHT));
+    }
+    return {
+      minX: minX - MINIMAP_PADDING,
+      minY: minY - MINIMAP_PADDING,
+      maxX: maxX + MINIMAP_PADDING,
+      maxY: maxY + MINIMAP_PADDING,
+    };
+  }, [sessions]);
+
+  const worldW = contentBounds.maxX - contentBounds.minX;
+  const worldH = contentBounds.maxY - contentBounds.minY;
+
+  // Fit into minimap keeping aspect ratio
+  const minimapScale = Math.min(MINIMAP_WIDTH / worldW, MINIMAP_HEIGHT / worldH);
+  const drawW = worldW * minimapScale;
+  const drawH = worldH * minimapScale;
+
+  // Map canvas coords to minimap coords
+  const toMinimap = useCallback(
+    (cx: number, cy: number) => ({
+      x: (cx - contentBounds.minX) * minimapScale,
+      y: (cy - contentBounds.minY) * minimapScale,
+    }),
+    [contentBounds, minimapScale]
+  );
+
+  // Viewport rect in minimap
+  const viewportRect = useMemo(() => {
+    const container = containerRef.current;
+    if (!container) return null;
+    const rect = container.getBoundingClientRect();
+    const vpLeft = -transform.x / transform.scale;
+    const vpTop = -transform.y / transform.scale;
+    const vpW = rect.width / transform.scale;
+    const vpH = rect.height / transform.scale;
+    const tl = toMinimap(vpLeft, vpTop);
+    return {
+      x: tl.x,
+      y: tl.y,
+      width: vpW * minimapScale,
+      height: vpH * minimapScale,
+    };
+  }, [transform, containerRef, toMinimap, minimapScale]);
+
+  // Clamp canvas center point to content area + margin
+  const clampCanvas = useCallback(
+    (cx: number, cy: number) => ({
+      x: Math.max(contentBounds.minX - NAVIGATION_MARGIN, Math.min(cx, contentBounds.maxX + NAVIGATION_MARGIN)),
+      y: Math.max(contentBounds.minY - NAVIGATION_MARGIN, Math.min(cy, contentBounds.maxY + NAVIGATION_MARGIN)),
+    }),
+    [contentBounds]
+  );
+
+  // Navigate: center viewport on a canvas-space point (clamped)
+  const navigateTo = useCallback(
+    (canvasX: number, canvasY: number) => {
+      const container = containerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const clamped = clampCanvas(canvasX, canvasY);
+      const scale = transformRef.current.scale;
+      const newX = -(clamped.x * scale) + rect.width / 2;
+      const newY = -(clamped.y * scale) + rect.height / 2;
+      onNavigate({ x: newX, y: newY, scale });
+    },
+    [containerRef, clampCanvas, onNavigate]
+  );
+
+  // Click-to-jump: convert minimap pixel to canvas coords and navigate
+  const handleMinimapClick = useCallback(
+    (e: React.MouseEvent | MouseEvent) => {
+      const el = minimapRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const offsetX = (MINIMAP_WIDTH - drawW) / 2;
+      const offsetY = (MINIMAP_HEIGHT - drawH) / 2;
+      const canvasX = (mx - offsetX) / minimapScale + contentBounds.minX;
+      const canvasY = (my - offsetY) / minimapScale + contentBounds.minY;
+      navigateTo(canvasX, canvasY);
+    },
+    [navigateTo, drawW, drawH, minimapScale, contentBounds]
+  );
+
+  // Drag handling — incremental delta mode
+  useEffect(() => {
+    if (!isDragging) return;
+    const onMove = (e: MouseEvent) => {
+      const prev = dragStartRef.current;
+      if (!prev) {
+        dragStartRef.current = { x: e.clientX, y: e.clientY };
+        return;
+      }
+      const dx = e.clientX - prev.x;
+      const dy = e.clientY - prev.y;
+      dragStartRef.current = { x: e.clientX, y: e.clientY };
+
+      // Convert minimap pixel delta to canvas-space delta
+      const canvasDx = dx / minimapScale;
+      const canvasDy = dy / minimapScale;
+
+      const container = containerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const t = transformRef.current;
+
+      // Current viewport center in canvas space
+      const centerX = (-t.x + rect.width / 2) / t.scale;
+      const centerY = (-t.y + rect.height / 2) / t.scale;
+
+      navigateTo(centerX + canvasDx, centerY + canvasDy);
+    };
+    const onUp = () => {
+      setIsDragging(false);
+      dragStartRef.current = null;
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [isDragging, minimapScale, containerRef, navigateTo]);
+
+  const offsetX = (MINIMAP_WIDTH - drawW) / 2;
+  const offsetY = (MINIMAP_HEIGHT - drawH) / 2;
+
+  return (
+    <div
+      ref={minimapRef}
+      className="absolute bottom-16 right-6 z-50 ui-overlay rounded-xl overflow-hidden border border-white/10 bg-black/50 backdrop-blur-md cursor-crosshair select-none"
+      style={{ width: MINIMAP_WIDTH, height: MINIMAP_HEIGHT }}
+      onMouseDown={(e) => {
+        e.stopPropagation();
+        setIsDragging(true);
+        dragStartRef.current = { x: e.clientX, y: e.clientY };
+        handleMinimapClick(e);
+      }}
+    >
+      {/* Session rectangles */}
+      <svg
+        width={MINIMAP_WIDTH}
+        height={MINIMAP_HEIGHT}
+        className="absolute inset-0"
+      >
+        <g transform={`translate(${offsetX}, ${offsetY})`}>
+          {sessions.map((s) => {
+            const pos = toMinimap(s.position.x, s.position.y);
+            const w = SESSION_WIDTH * minimapScale;
+            const h = (s.height ?? SESSION_DEFAULT_HEIGHT) * minimapScale;
+            const color = MODEL_COLORS[s.model] || '#94a3b8';
+            return (
+              <rect
+                key={s.id}
+                x={pos.x}
+                y={pos.y}
+                width={w}
+                height={h}
+                rx={2}
+                fill={color}
+                fillOpacity={0.5}
+                stroke={color}
+                strokeOpacity={0.8}
+                strokeWidth={1}
+              />
+            );
+          })}
+          {/* Viewport indicator */}
+          {viewportRect && (
+            <rect
+              x={viewportRect.x}
+              y={viewportRect.y}
+              width={viewportRect.width}
+              height={viewportRect.height}
+              rx={2}
+              fill="white"
+              fillOpacity={0.08}
+              stroke="white"
+              strokeOpacity={0.6}
+              strokeWidth={1.5}
+            />
+          )}
+        </g>
+      </svg>
     </div>
   );
 }
@@ -319,6 +599,10 @@ function DraggableSession({
   transformScale,
   isFocused,
   isSelected,
+  toolMode,
+  isGroupDrag,
+  onGroupDragStart,
+  onGroupDragMove,
   onSelect,
   updateSession,
   onOpenReview
@@ -327,12 +611,20 @@ function DraggableSession({
   transformScale: number,
   isFocused?: boolean,
   isSelected?: boolean,
+  toolMode: 'hand' | 'select',
+  isGroupDrag: boolean,
+  onGroupDragStart: () => void,
+  onGroupDragMove: (dx: number, dy: number) => void,
   onSelect?: (multi: boolean) => void,
   updateSession: (s: Session) => void,
   onOpenReview: () => void
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+
+  // Group drag refs
+  const dragStartPointRef = useRef({ x: 0, y: 0 });
+  const isGroupDragActiveRef = useRef(false);
 
   // Resize state
   const [isResizing, setIsResizing] = useState(false);
@@ -342,14 +634,32 @@ function DraggableSession({
 
   const handleMouseDown = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
-    if (target.closest('.session-header')) {
+    const isHeader = !!target.closest('.session-header');
+    const isHandModeDrag = toolMode === 'hand' && !target.closest('button, input, textarea, a, select, [contenteditable]');
+    const canDrag = isHeader || isHandModeDrag;
+
+    if (canDrag) {
       e.stopPropagation();
-      onSelect?.(e.shiftKey || e.metaKey || e.ctrlKey);
+      // Don't reset selection when starting a group drag
+      if (!isGroupDrag) {
+        onSelect?.(e.shiftKey || e.metaKey || e.ctrlKey);
+      }
       setIsDragging(true);
-      setDragOffset({
-        x: e.clientX / transformScale - session.position.x,
-        y: e.clientY / transformScale - session.position.y
-      });
+
+      if (isGroupDrag) {
+        onGroupDragStart();
+        dragStartPointRef.current = {
+          x: e.clientX / transformScale,
+          y: e.clientY / transformScale
+        };
+        isGroupDragActiveRef.current = true;
+      } else {
+        setDragOffset({
+          x: e.clientX / transformScale - session.position.x,
+          y: e.clientY / transformScale - session.position.y
+        });
+        isGroupDragActiveRef.current = false;
+      }
     } else {
       onSelect?.(e.shiftKey || e.metaKey || e.ctrlKey);
     }
@@ -359,18 +669,25 @@ function DraggableSession({
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (isDragging) {
-        updateSession({
-          ...session,
-          position: {
-            x: e.clientX / transformScale - dragOffset.x,
-            y: e.clientY / transformScale - dragOffset.y
-          }
-        });
+        if (isGroupDragActiveRef.current) {
+          const deltaX = e.clientX / transformScale - dragStartPointRef.current.x;
+          const deltaY = e.clientY / transformScale - dragStartPointRef.current.y;
+          onGroupDragMove(deltaX, deltaY);
+        } else {
+          updateSession({
+            ...session,
+            position: {
+              x: e.clientX / transformScale - dragOffset.x,
+              y: e.clientY / transformScale - dragOffset.y
+            }
+          });
+        }
       }
     };
 
     const handleMouseUp = () => {
       setIsDragging(false);
+      isGroupDragActiveRef.current = false;
     };
 
     if (isDragging) {
@@ -382,7 +699,7 @@ function DraggableSession({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, dragOffset, session, updateSession, transformScale]);
+  }, [isDragging, dragOffset, session, updateSession, transformScale, onGroupDragMove]);
 
   // Resize handlers
   const handleResizeMouseDown = (e: React.MouseEvent) => {
@@ -438,7 +755,7 @@ function DraggableSession({
 
   return (
     <div
-      className={`session-container absolute transition-shadow duration-300 ${isFocused ? 'ring-4 ring-blue-500/50 rounded-2xl shadow-2xl shadow-blue-500/20' : ''} ${isSelected ? 'ring-2 ring-blue-400 rounded-2xl shadow-lg shadow-blue-500/20' : ''}`}
+      className={`session-container absolute transition-shadow duration-300 ${isFocused ? 'ring-4 ring-blue-500/50 rounded-2xl shadow-2xl shadow-blue-500/20' : ''} ${isSelected ? 'ring-2 ring-blue-400 rounded-2xl shadow-lg shadow-blue-500/20' : ''} ${toolMode === 'hand' ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
       style={{ left: session.position.x, top: session.position.y }}
       onMouseDown={handleMouseDown}
     >

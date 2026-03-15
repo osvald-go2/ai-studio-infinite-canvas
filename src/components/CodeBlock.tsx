@@ -12,8 +12,8 @@ export function CodeBlock({ code, language }: { code: string, language: string }
   };
 
   return (
-    <div className="my-3 rounded-xl overflow-hidden border border-white/10 bg-[#2B2D3A]/80 backdrop-blur-md">
-      <div className="flex items-center justify-between px-4 py-2 bg-black/40 border-b border-white/5">
+    <div className="my-3 rounded-xl overflow-hidden border border-white/10 bg-white/[0.03]">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-white/5 bg-white/[0.02]">
         <span className="text-xs font-medium text-gray-400">{language || 'text'}</span>
         <button onClick={handleCopy} className="text-gray-500 hover:text-gray-300 transition-colors">
           {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}

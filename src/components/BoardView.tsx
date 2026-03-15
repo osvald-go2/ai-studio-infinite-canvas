@@ -229,7 +229,7 @@ export function BoardView({
 
       {/* Right Sidebar for Active Session */}
       <div
-        className={`absolute right-0 top-0 h-full w-[500px] border-l border-white/10 bg-[#3B3F4F]/95 backdrop-blur-3xl flex flex-col shadow-2xl z-20 transition-transform duration-300 ease-in-out ${
+        className={`absolute right-0 top-0 h-full w-[500px] border-l border-white/10 bg-[#1E1814]/80 backdrop-blur-3xl flex flex-col shadow-2xl z-20 transition-transform duration-300 ease-in-out ${
           activeSessionId ? 'translate-x-0' : 'translate-x-full'
         }`}
       >

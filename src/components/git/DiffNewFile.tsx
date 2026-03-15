@@ -17,10 +17,10 @@ export function DiffNewFile({ file }: DiffNewFileProps) {
       <div className="bg-green-500/[0.03]">
         {lines.map((line, idx) => (
           <div key={idx} className="px-3 py-0.5 min-h-[1.8em] bg-green-500/[0.08]">
-            <span className="text-gray-600 select-none mr-3 inline-block w-8 text-right font-mono text-xs">
+            <span className="text-gray-600 select-none mr-3 inline-block w-8 text-right font-mono text-[13px]">
               {line.lineNumber}
             </span>
-            <span className="font-mono text-xs text-green-300 whitespace-pre">{line.content}</span>
+            <span className="font-mono text-[13px] text-green-300 whitespace-pre">{line.content}</span>
           </div>
         ))}
       </div>

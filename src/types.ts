@@ -21,7 +21,13 @@ export type ContentBlock =
   | { type: 'todolist'; items: TodoItem[] }
   | { type: 'subagent'; agentId: string; task: string; status: 'launched' | 'working' | 'done' | 'error'; summary?: string; blocks?: ContentBlock[] }
   | { type: 'askuser'; questions: AskUserQuestion[]; submitted?: boolean }
-  | { type: 'skill'; skill: string; args?: string; status: 'invoking' | 'done'; duration?: number };
+  | { type: 'skill'; skill: string; args?: string; status: 'invoking' | 'done'; duration?: number }
+  | { type: 'file_changes'; title: string; files: FileChangeItem[] };
+
+export interface FileChangeItem {
+  path: string;
+  status: 'new' | 'modified' | 'deleted' | 'renamed';
+}
 
 export interface AskUserQuestion {
   id: string;

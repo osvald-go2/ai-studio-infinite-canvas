@@ -13,28 +13,36 @@ interface DiffPanelProps {
 export function DiffPanel({ file, onClose }: DiffPanelProps) {
   const statusLabel = file.status === 'M' ? 'MODIFIED' : file.status === 'A' ? 'ADDED' : 'DELETED';
   const statusColor = file.status === 'M'
-    ? 'bg-yellow-500/15 text-yellow-400'
+    ? 'bg-yellow-500/20 text-yellow-500 border-yellow-500/20'
     : file.status === 'A'
-      ? 'bg-green-500/15 text-green-400'
-      : 'bg-red-500/15 text-red-400';
+      ? 'bg-[#10b981]/20 text-[#10b981] border-[#10b981]/20'
+      : 'bg-red-500/20 text-red-500 border-red-500/20';
+
+  // Extract language from filename extension
+  const ext = file.filename.split('.').pop() || '';
+  const langMap: Record<string, string> = { tsx: 'TypeScript React', ts: 'TypeScript', js: 'JavaScript', jsx: 'JavaScript React', css: 'CSS', json: 'JSON' };
+  const language = langMap[ext] || ext;
 
   return (
-    <div className="flex flex-col h-full bg-[#3B3F4F]/95 backdrop-blur-2xl border-l border-white/10">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 bg-black/20 flex-shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="text-white text-[15px] font-medium truncate">{file.filename}</span>
-          <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold flex-shrink-0 ${statusColor}`}>
+    <div className="flex flex-col h-full bg-[#1a1f25]/90 rounded-xl border border-white/[0.06] shadow-lg overflow-hidden">
+      {/* Header — 样式1 */}
+      <div className="flex items-center justify-between px-4 py-2 bg-white/[0.03] border-b border-white/[0.06] flex-shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[12px] font-mono text-white/50 truncate">{file.filename}</span>
+          <span className="text-[11px] font-mono text-white/40">{language}</span>
+          <span className={`text-[10px] font-bold uppercase px-1.5 py-[1px] rounded border flex-shrink-0 ${statusColor}`}>
             {statusLabel}
           </span>
         </div>
         <button
           onClick={onClose}
-          className="w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-gray-400 hover:text-white transition-colors flex-shrink-0"
+          className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white transition-colors flex-shrink-0"
         >
           <X size={14} />
         </button>
       </div>
 
+      {/* Diff Content */}
       {file.status === 'M' && <DiffSideBySide file={file} />}
       {file.status === 'A' && <DiffNewFile file={file} />}
       {file.status === 'D' && <DiffDeletedFile file={file} />}

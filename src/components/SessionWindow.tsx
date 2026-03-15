@@ -19,7 +19,8 @@ export function SessionWindow({
   fullScreen = false,
   height,
   animateHeight = false,
-  onHeaderDoubleClick
+  onHeaderDoubleClick,
+  variant = 'default'
 }: {
   session: Session,
   onUpdate: (s: Session) => void,
@@ -28,7 +29,8 @@ export function SessionWindow({
   fullScreen?: boolean,
   height?: number,
   animateHeight?: boolean,
-  onHeaderDoubleClick?: (e: React.MouseEvent) => void
+  onHeaderDoubleClick?: (e: React.MouseEvent) => void,
+  variant?: 'default' | 'tab'
 }) {
   const [inputValue, setInputValue] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -360,79 +362,96 @@ export function SessionWindow({
     }
   }, [isEditingTitle]);
 
+  const isTab = variant === 'tab';
+
   return (
     <div className={`flex flex-col overflow-hidden text-sm text-gray-200 ${
-      fullScreen
-        ? 'w-full h-full bg-transparent'
-        : 'w-[600px] bg-[#3B3F4F]/90 backdrop-blur-3xl rounded-[32px] border border-white/10 shadow-2xl'
+      isTab
+        ? 'w-full h-full bg-[#1E1814]/80 backdrop-blur-[24px]'
+        : fullScreen
+          ? 'w-full h-full bg-transparent'
+          : 'w-[600px] bg-[#1E1814]/80 backdrop-blur-3xl rounded-[32px] border border-white/10 shadow-2xl'
     }`}
-    style={!fullScreen && height ? { height, transition: animateHeight ? 'height 0.3s cubic-bezier(0.4, 0, 0.2, 1)' : undefined } : undefined}
+    style={!fullScreen && !isTab && height ? { height, transition: animateHeight ? 'height 0.3s cubic-bezier(0.4, 0, 0.2, 1)' : undefined } : undefined}
     >
       {/* Header */}
-      <div className={`session-header flex items-center justify-between p-4 px-6 select-none ${fullScreen ? 'border-b border-white/5 bg-black/20' : 'cursor-move'}`} onDoubleClick={onHeaderDoubleClick}>
-        <div className="flex items-center gap-3">
-          {onClose && (
-            <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors">
-              <X size={16} className="text-gray-400" />
-            </button>
-          )}
-          <span className={`w-2 h-2 rounded-full shrink-0 ${
-            isStreaming
-              ? 'bg-yellow-400 animate-pulse'
-              : session.status === 'review' || session.status === 'done'
-                ? 'bg-green-400'
-                : 'bg-gray-400'
-          }`} />
-          {isEditingTitle ? (
-            <input
-              ref={titleInputRef}
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
-              onBlur={handleTitleSave}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === 'Enter') {
-                  handleTitleSave();
-                } else if (e.key === 'Escape') {
-                  handleTitleCancel();
-                }
-              }}
-              onMouseDown={(e) => e.stopPropagation()}
-              maxLength={100}
-              className={`bg-transparent border-b border-white/30 outline-none font-medium text-white ${
-                fullScreen ? 'text-lg' : 'text-sm max-w-[200px]'
-              }`}
-            />
-          ) : (
-            <div className="group/title flex items-center gap-1.5">
-              <span
-                onDoubleClick={handleTitleDoubleClick}
-                className={`font-medium text-white truncate cursor-default ${
+      {isTab ? (
+        <div className="flex items-center justify-end py-4 px-6 select-none shrink-0">
+          <div className="flex items-center gap-2 text-[#9CA3AF]">
+            <button className="hover:text-gray-200 transition-colors"><Clock size={18} /></button>
+            <button className="hover:text-gray-200 transition-colors"><Plus size={18} /></button>
+          </div>
+        </div>
+      ) : (
+        <div className={`session-header flex items-center justify-between p-4 px-6 select-none shrink-0 ${fullScreen ? 'border-b border-white/5 bg-black/20' : 'cursor-move bg-[#1E1814]/90'}`} onDoubleClick={onHeaderDoubleClick}>
+          <div className="flex items-center gap-3">
+            {onClose && (
+              <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors">
+                <X size={16} className="text-gray-400" />
+              </button>
+            )}
+            <span className={`w-2 h-2 rounded-full shrink-0 ${
+              isStreaming
+                ? 'bg-yellow-400 animate-pulse'
+                : session.status === 'review' || session.status === 'done'
+                  ? 'bg-green-400'
+                  : 'bg-gray-400'
+            }`} />
+            {isEditingTitle ? (
+              <input
+                ref={titleInputRef}
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                onBlur={handleTitleSave}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === 'Enter') {
+                    handleTitleSave();
+                  } else if (e.key === 'Escape') {
+                    handleTitleCancel();
+                  }
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
+                maxLength={100}
+                className={`bg-transparent border-b border-white/30 outline-none font-medium text-white ${
                   fullScreen ? 'text-lg' : 'text-sm max-w-[200px]'
                 }`}
-              >
-                {session.title}
-              </span>
-              <button
-                onClick={(e) => { e.stopPropagation(); handleTitleDoubleClick(e); }}
-                onMouseDown={(e) => e.stopPropagation()}
-                className="opacity-0 group-hover/title:opacity-100 text-gray-400 hover:text-white transition-opacity"
-              >
-                <Pencil size={12} />
-              </button>
-            </div>
-          )}
+              />
+            ) : (
+              <div className="group/title flex items-center gap-1.5">
+                <span
+                  onDoubleClick={handleTitleDoubleClick}
+                  className={`font-medium text-white truncate cursor-default ${
+                    fullScreen ? 'text-lg' : 'text-sm max-w-[200px]'
+                  }`}
+                >
+                  {session.title}
+                </span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleTitleDoubleClick(e); }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className="opacity-0 group-hover/title:opacity-100 text-gray-400 hover:text-white transition-opacity"
+                >
+                  <Pencil size={12} />
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-3 text-gray-400">
+            <button className="hover:text-gray-200 transition-colors"><Clock size={18} /></button>
+            <button className="hover:text-gray-200 transition-colors"><Plus size={20} /></button>
+          </div>
         </div>
-        <div className="flex items-center gap-3 text-gray-400">
-          <button className="hover:text-gray-200 transition-colors"><Clock size={18} /></button>
-          <button className="hover:text-gray-200 transition-colors"><Plus size={20} /></button>
-        </div>
-      </div>
+      )}
 
       {/* Content */}
-      <div 
+      <div
         ref={scrollContainerRef}
-        className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar ${fullScreen ? 'p-8' : `p-6 pt-2${height ? '' : ' max-h-[600px]'}`}`}
+        className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar ${
+          isTab ? 'pt-2 px-6 pb-6'
+          : fullScreen ? 'p-8'
+          : `p-6 pt-2${height ? '' : ' max-h-[600px]'}`
+        }`}
       >
         <div className={`space-y-6 ${fullScreen ? 'max-w-4xl mx-auto w-full' : ''}`}>
           {session.id === '1' ? (
@@ -443,8 +462,8 @@ export function SessionWindow({
                 <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                   <div className={`${
                     msg.role === 'user'
-                      ? 'max-w-[85%] bg-white/10 text-gray-200 rounded-3xl px-5 py-3.5'
-                      : 'text-gray-300 w-full'
+                      ? 'max-w-[85%] bg-white/10 text-gray-200 rounded-[24px] px-5 py-3.5'
+                      : `text-gray-300 w-full${isTab ? ' pl-1' : ''}`
                   }`}>
                     {msg.role === 'user' ? (
                       <div className="whitespace-pre-wrap leading-relaxed text-[15px]">
@@ -466,8 +485,13 @@ export function SessionWindow({
       </div>
 
       {/* Bottom Input */}
-      {!(height && height <= 110) && <div className={`p-4 pb-6 ${fullScreen ? 'w-full max-w-4xl mx-auto' : 'px-6'}`}>
-        <div className={`bg-[#A07841]/30 backdrop-blur-xl rounded-[24px] p-2 flex flex-col gap-2 border border-white/10 shadow-xl focus-within:border-white/20 focus-within:ring-4 focus-within:ring-white/5 transition-all`}>
+      {!(height && height <= 110) && <div className={`shrink-0 ${
+        isTab ? 'p-4 pb-6 w-full max-w-4xl mx-auto'
+        : `p-4 pb-6 ${fullScreen ? 'w-full max-w-4xl mx-auto' : 'px-6'}`
+      }`}>
+        <div className={`bg-[#9A6A45]/30 rounded-[24px] p-2 flex flex-col gap-2 ${
+          isTab ? '' : 'backdrop-blur-xl border border-white/10 shadow-xl focus-within:border-white/20 focus-within:ring-4 focus-within:ring-white/5 transition-all'
+        }`}>
           <textarea 
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
@@ -484,11 +508,15 @@ export function SessionWindow({
           />
           <div className="flex items-center justify-between px-2 pb-1">
             <div className="flex items-center gap-2">
-              <button className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-gray-300 hover:text-white transition-colors">
+              <button className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+                isTab ? 'bg-transparent text-gray-300 hover:text-white hover:bg-white/10' : 'bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white'
+              }`}>
                 <Plus size={16} />
               </button>
-              <button className="bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white px-3 py-1.5 rounded-full text-xs font-medium transition-colors border border-white/5">
-                Claude Opus 4.6
+              <button className={`rounded-full font-medium transition-colors ${
+                isTab ? 'bg-white/[0.1] px-2 py-0.5 text-[11px] text-gray-300 hover:text-white hover:bg-white/20' : 'bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white px-3 py-1.5 text-xs border border-white/5'
+              }`}>
+                {isTab ? 'Claude' : 'Claude Opus 4.6'}
               </button>
               
               {/* Review Button */}

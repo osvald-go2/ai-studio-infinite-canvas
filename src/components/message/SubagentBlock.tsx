@@ -46,27 +46,16 @@ export function SubagentBlock({ agentId, task, status, summary, blocks }: Subage
   const hasNestedBlocks = Boolean(blocks && blocks.length > 0);
 
   return (
-    <details className="group rounded-2xl border border-white/10 bg-[#2B2D3A]/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] backdrop-blur-sm">
-      <summary className="flex cursor-pointer list-none items-start gap-3 px-3.5 py-3 [&::-webkit-details-marker]:hidden">
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl border border-white/8 bg-white/[0.04] text-gray-200">
-          <Bot size={14} strokeWidth={1.9} />
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-medium text-gray-200">子智能体</span>
-            <span className="font-mono text-[11px] text-gray-500">{agentId}</span>
-            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${statusStyle.badgeClassName}`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${statusStyle.statusDotClassName}`} />
-              {statusStyle.label}
-            </span>
-          </div>
-
-          <p className="mt-1 text-[14px] leading-5 text-gray-100">{task}</p>
-          {summary && <p className="mt-1 text-xs leading-5 text-gray-400">{summary}</p>}
-        </div>
-
-        <div className="mt-0.5 flex items-center gap-1 text-gray-500">
+    <details className="group rounded-xl border border-white/10 bg-white/[0.03] overflow-hidden">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-2.5 border-b border-white/5 bg-white/[0.02] [&::-webkit-details-marker]:hidden">
+        <Bot size={14} className="text-violet-400 shrink-0" />
+        <span className="text-xs font-medium text-gray-400">子智能体</span>
+        <span className="font-mono text-[11px] text-gray-500">{agentId}</span>
+        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${statusStyle.badgeClassName}`}>
+          <span className={`h-1.5 w-1.5 rounded-full ${statusStyle.statusDotClassName}`} />
+          {statusStyle.label}
+        </span>
+        <div className="ml-auto flex items-center gap-1 text-gray-500">
           {status === 'working' ? (
             <StatusIcon size={13} className="animate-spin" />
           ) : (
@@ -76,17 +65,16 @@ export function SubagentBlock({ agentId, task, status, summary, blocks }: Subage
         </div>
       </summary>
 
-      {hasNestedBlocks && (
-        <div className="border-t border-white/6 px-3.5 pb-3 pt-3">
-          <div className="rounded-xl border border-white/6 bg-black/10 px-3 py-3">
-            <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] text-gray-500">
-              <Bot size={12} className="text-gray-400" />
-              <span>子智能体轨迹</span>
-            </div>
+      <div className="px-4 py-3 space-y-2">
+        <p className="text-[14px] leading-5 text-gray-200">{task}</p>
+        {summary && <p className="text-xs text-gray-400">{summary}</p>}
+
+        {hasNestedBlocks && (
+          <div className="rounded-lg border border-white/5 bg-black/10 px-3 py-3 mt-2">
             <ContentBlocksView blocks={blocks} />
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </details>
   );
 }
