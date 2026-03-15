@@ -1,9 +1,9 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
 import Store from 'electron-store';
 import { SidecarManager } from './sidecar';
 
-const store = new Store<{ anthropicApiKey?: string }>();
+const store = new Store<{ anthropicApiKey?: string; lastProjectDir?: string }>();
 
 let mainWindow: BrowserWindow | null = null;
 let sidecar: SidecarManager | null = null;
@@ -77,6 +77,24 @@ ipcMain.handle('sidecar:invoke', async (_, method: string, params: any) => {
   }
 
   return sidecar.invoke(method, params);
+});
+
+ipcMain.handle('get-working-dir', () => {
+  return process.cwd();
+});
+
+ipcMain.handle('dialog:openDirectory', async () => {
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    properties: ['openDirectory'],
+    title: '选择项目目录',
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  store.set('lastProjectDir', result.filePaths[0]);
+  return result.filePaths[0];
+});
+
+ipcMain.handle('config:getLastProjectDir', () => {
+  return store.get('lastProjectDir', null);
 });
 
 app.whenReady().then(() => {

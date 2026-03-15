@@ -29,4 +29,16 @@ contextBridge.exposeInMainWorld('aiBackend', {
       callback(eventName, data);
     });
   },
+
+  getWorkingDir: (): Promise<string> => {
+    return ipcRenderer.invoke('get-working-dir');
+  },
+
+  openDirectory: (): Promise<string | null> => {
+    return ipcRenderer.invoke('dialog:openDirectory');
+  },
+
+  getLastProjectDir: (): Promise<string | null> => {
+    return ipcRenderer.invoke('config:getLastProjectDir');
+  },
 });
