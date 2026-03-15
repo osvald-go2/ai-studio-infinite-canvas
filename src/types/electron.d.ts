@@ -6,6 +6,7 @@ interface AiBackend {
   getWorkingDir(): Promise<string>;
   openDirectory(): Promise<string | null>;
   getLastProjectDir(): Promise<string | null>;
+  scanSkills(platform: string, projectDir: string): Promise<any>;
 }
 
 interface Window {

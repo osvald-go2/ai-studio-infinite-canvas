@@ -101,3 +101,10 @@ export interface DbSession {
   created_at: string;
   updated_at: string;
 }
+
+export interface SkillInfo {
+  name: string;
+  description: string;
+  filePath: string;
+  source: 'project' | 'user';
+}

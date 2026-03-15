@@ -30,6 +30,18 @@ contextBridge.exposeInMainWorld('aiBackend', {
     });
   },
 
+  toggleMaximize: (): Promise<void> => {
+    return ipcRenderer.invoke('window:toggleMaximize');
+  },
+
+  startWindowDrag: (screenX: number, screenY: number): void => {
+    ipcRenderer.send('window:startDrag', screenX, screenY);
+  },
+
+  windowDragging: (screenX: number, screenY: number): void => {
+    ipcRenderer.send('window:dragging', screenX, screenY);
+  },
+
   getWorkingDir: (): Promise<string> => {
     return ipcRenderer.invoke('get-working-dir');
   },
@@ -40,5 +52,15 @@ contextBridge.exposeInMainWorld('aiBackend', {
 
   getLastProjectDir: (): Promise<string | null> => {
     return ipcRenderer.invoke('config:getLastProjectDir');
+  },
+
+  onFullScreenChange: (callback: (isFullScreen: boolean) => void): void => {
+    ipcRenderer.on('window:fullscreen-changed', (_, isFullScreen) => {
+      callback(isFullScreen);
+    });
+  },
+
+  scanSkills: (platform: string, projectDir: string): Promise<any> => {
+    return ipcRenderer.invoke('scan-skills', platform, projectDir);
   },
 });

@@ -1,12 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Clock, Plus, MessageSquare, Send, Copy, ThumbsUp, ThumbsDown, ArrowUp, Square, Minus, Check, Pencil, RotateCcw } from 'lucide-react';
-import { Session, Message, ContentBlock } from '../types';
+import { X, Clock, Plus, MessageSquare, Send, Copy, ThumbsUp, ThumbsDown, ArrowUp, Square, Minus, Check, Pencil, RotateCcw, GitBranch, GitFork, Trash2 } from 'lucide-react';
+import { Session, Message, ContentBlock, SkillInfo } from '../types';
 import { generateMockDiff } from '../services/mockGit';
 import { MessageRenderer } from './message/MessageRenderer';
 import { STRUCTURED_MOCK_RESPONSES } from '../utils/mockResponses';
 import { backend } from '../services/backend';
 import { gitService } from '../services/git';
 import { getStatusDotClass } from '../utils/statusColors';
+import { SkillPicker } from './SkillPicker';
+import { scanSkills } from '../services/skillScanner';
 
 function isElectron(): boolean {
   return typeof window !== 'undefined' && window.aiBackend !== undefined;
@@ -17,6 +19,7 @@ export function SessionWindow({
   session,
   onUpdate,
   onClose,
+  onDelete,
   onOpenReview,
   fullScreen = false,
   height,
@@ -28,6 +31,7 @@ export function SessionWindow({
   session: Session,
   onUpdate: (s: Session) => void,
   onClose?: () => void,
+  onDelete?: () => void,
   onOpenReview?: () => void,
   fullScreen?: boolean,
   height?: number,
@@ -42,6 +46,11 @@ export function SessionWindow({
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [backendSessionId, setBackendSessionId] = useState<string | null>(null);
+  const [skills, setSkills] = useState<SkillInfo[]>([]);
+  const [filteredSkills, setFilteredSkills] = useState<SkillInfo[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerIndex, setPickerIndex] = useState(0);
+  const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
 
   const isStreamingRef = useRef(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -49,6 +58,8 @@ export function SessionWindow({
   const titleInputRef = useRef<HTMLInputElement>(null);
   const backendSessionIdRef = useRef<string | null>(null);
   const streamingMessageIdRef = useRef<string | null>(null);
+  const inputValueRef = useRef('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -268,6 +279,10 @@ export function SessionWindow({
 
     const currentInput = inputValue;
     setInputValue('');
+    inputValueRef.current = '';
+    setSelectedSkill(null);
+    setSkills([]);
+    setPickerOpen(false);
     setIsStreaming(true);
     setStreamingMessageId(aiMsgId);
     streamingMessageIdRef.current = aiMsgId;
@@ -379,10 +394,85 @@ export function SessionWindow({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (pickerOpen && filteredSkills.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setPickerIndex(i => (i + 1) % filteredSkills.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setPickerIndex(i => (i - 1 + filteredSkills.length) % filteredSkills.length);
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        handleSkillSelect(filteredSkills[pickerIndex]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        setPickerOpen(false);
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
+  };
+
+  const handleInputChange = async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setInputValue(val);
+    inputValueRef.current = val;
+
+    const isFirstMessage = session.messages.length === 0;
+
+    if (isFirstMessage && val.startsWith('/') && val.length >= 1) {
+      let currentSkills = skills;
+      if (currentSkills.length === 0) {
+        currentSkills = await scanSkills(session.model, projectDir);
+        if (!inputValueRef.current.startsWith('/')) return;
+        setSkills(currentSkills);
+      }
+
+      const query = val.slice(1).split(' ')[0].toLowerCase();
+      const hasSelectedAndComplete = selectedSkill && val.startsWith(`/${selectedSkill} `);
+
+      if (!hasSelectedAndComplete) {
+        const filtered = query
+          ? currentSkills.filter(s => s.name.toLowerCase().includes(query))
+          : currentSkills;
+        setFilteredSkills(filtered);
+        setPickerOpen(filtered.length > 0);
+        setPickerIndex(0);
+
+        const exactMatch = currentSkills.find(s => s.name === query);
+        setSelectedSkill(exactMatch ? exactMatch.name : null);
+      } else {
+        setPickerOpen(false);
+      }
+    } else {
+      setPickerOpen(false);
+      if (!val.startsWith('/')) {
+        setSelectedSkill(null);
+        setSkills([]);
+      }
+    }
+  };
+
+  const handleSkillSelect = (skill: SkillInfo) => {
+    const newValue = `/${skill.name} `;
+    setInputValue(newValue);
+    inputValueRef.current = newValue;
+    setSelectedSkill(skill.name);
+    setPickerOpen(false);
+    setFilteredSkills([]);
+    textareaRef.current?.focus();
   };
 
   const handleTitleSave = () => {
@@ -426,7 +516,7 @@ export function SessionWindow({
   return (
     <div className={`flex flex-col overflow-hidden text-sm text-gray-200 ${
       isTab
-        ? 'w-full h-full bg-[#1E1814]/80 backdrop-blur-[24px]'
+        ? 'w-full h-full bg-[#1E1814]/80 backdrop-blur-3xl'
         : fullScreen
           ? 'w-full h-full bg-transparent'
           : 'w-[600px] bg-[#1E1814]/80 backdrop-blur-3xl rounded-[32px] border border-white/10 shadow-2xl'
@@ -439,6 +529,15 @@ export function SessionWindow({
           <div className="flex items-center gap-2 text-[#9CA3AF]">
             <button className="hover:text-gray-200 transition-colors"><Clock size={18} /></button>
             <button className="hover:text-gray-200 transition-colors"><Plus size={18} /></button>
+            {onDelete && (
+              <button
+                onClick={() => { if (window.confirm('确定要删除这个 session 吗？')) onDelete(); }}
+                className="hover:text-red-400 transition-colors"
+                title="删除 session"
+              >
+                <Trash2 size={18} />
+              </button>
+            )}
           </div>
         </div>
       ) : (
@@ -496,10 +595,35 @@ export function SessionWindow({
                 </button>
               </div>
             )}
+            {session.gitBranch && session.gitBranch !== 'main' && (
+              <div className="flex items-center gap-1 bg-orange-500/10 border border-orange-500/20 rounded-lg px-2 py-0.5 shrink-0">
+                <GitBranch size={12} className="text-orange-400" />
+                <span className="text-[11px] font-mono text-orange-300 truncate max-w-[120px]">{session.gitBranch}</span>
+              </div>
+            )}
+            {session.worktree && session.worktree !== 'default' && (
+              <div className="flex items-center gap-1 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2 py-0.5 shrink-0">
+                <GitFork size={12} className="text-amber-400" />
+                <span className="text-[11px] font-mono text-amber-300">worktree</span>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-3 text-gray-400">
             <button className="hover:text-gray-200 transition-colors"><Clock size={18} /></button>
             <button className="hover:text-gray-200 transition-colors"><Plus size={20} /></button>
+            {onDelete && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (window.confirm('确定要删除这个 session 吗？')) onDelete();
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
+                className="hover:text-red-400 transition-colors"
+                title="删除 session"
+              >
+                <Trash2 size={18} />
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -558,23 +682,45 @@ export function SessionWindow({
         isTab ? 'p-4 pb-6 w-full max-w-4xl mx-auto'
         : `p-4 pb-6 ${fullScreen ? 'w-full max-w-4xl mx-auto' : 'px-6'}`
       }`}>
-        <div className={`bg-[#9A6A45]/30 rounded-[24px] p-2 flex flex-col gap-2 ${
-          isTab ? '' : 'backdrop-blur-xl border border-white/10 shadow-xl focus-within:border-white/20 focus-within:ring-4 focus-within:ring-white/5 transition-all'
-        }`}>
-          <textarea 
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="随便问..." 
-            rows={1}
-            className="bg-transparent border-none outline-none px-4 py-3 text-white placeholder-gray-400 w-full resize-none min-h-[44px] max-h-[200px]"
-            style={{ height: 'auto' }}
-            onInput={(e) => {
-              const target = e.target as HTMLTextAreaElement;
-              target.style.height = 'auto';
-              target.style.height = `${Math.min(target.scrollHeight, 200)}px`;
-            }}
-          />
+        <div className="bg-[#9A6A45]/30 rounded-[24px] p-2 flex flex-col gap-2 backdrop-blur-xl border border-white/10 shadow-xl focus-within:border-white/20 focus-within:ring-4 focus-within:ring-white/5 transition-all">
+          <div className="relative">
+            {pickerOpen && filteredSkills.length > 0 && (
+              <SkillPicker
+                skills={filteredSkills}
+                query={inputValue.slice(1).split(' ')[0]}
+                selectedIndex={pickerIndex}
+                onSelect={handleSkillSelect}
+              />
+            )}
+            {selectedSkill && inputValue.startsWith(`/${selectedSkill}`) && (
+              <div
+                className="absolute inset-0 px-4 py-3 pointer-events-none whitespace-pre-wrap text-sm leading-normal"
+                aria-hidden
+              >
+                <span className="bg-amber-500/15 text-white rounded px-0.5">/{selectedSkill}</span>
+                <span className="text-transparent">{inputValue.slice(selectedSkill.length + 1)}</span>
+              </div>
+            )}
+            <textarea
+              ref={textareaRef}
+              value={inputValue}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              placeholder="随便问..."
+              rows={1}
+              className={`bg-transparent border-none outline-none px-4 py-3 placeholder-gray-400 w-full resize-none min-h-[44px] max-h-[200px] relative z-10 text-sm ${
+                selectedSkill && inputValue.startsWith(`/${selectedSkill}`)
+                  ? 'text-transparent caret-white'
+                  : 'text-white'
+              }`}
+              style={{ height: 'auto' }}
+              onInput={(e) => {
+                const target = e.target as HTMLTextAreaElement;
+                target.style.height = 'auto';
+                target.style.height = `${Math.min(target.scrollHeight, 200)}px`;
+              }}
+            />
+          </div>
           <div className="flex items-center justify-between px-2 pb-1">
             <div className="flex items-center gap-2">
               <button className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
@@ -665,7 +811,7 @@ function MessageActions({ message }: { message: Message }) {
     if (message.blocks && message.blocks.length > 0) {
       text = message.blocks
         .map(b => {
-          if (b.type === 'text') return b.content;
+          if (b.type === 'text') return b.content.startsWith('Connected:') ? '' : b.content;
           if (b.type === 'code') return b.code;
           return '';
         })
