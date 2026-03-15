@@ -93,4 +93,5 @@ export interface SkillInfo {
   description: string;
   filePath: string;
   source: 'project' | 'user';
+  pluginName?: string;
 }
