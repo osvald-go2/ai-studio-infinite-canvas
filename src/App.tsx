@@ -194,8 +194,6 @@ export default function App() {
 
   const handleLocateSession = (id: string) => {
     setFocusedSessionId(id);
-    // Clear it after a short delay so it can be triggered again if needed
-    setTimeout(() => setFocusedSessionId(null), 100);
   };
 
   const handleSessionUpdate = (id: string, updates: Partial<Session>) => {

@@ -28,7 +28,7 @@ export function DiscardWorktreeDialog({
     setIsRemoving(true);
     setError(null);
     try {
-      await gitService.removeWorktree(projectDir, worktreePath);
+      await gitService.removeWorktree(projectDir, worktreePath, branch);
       onSuccess();
       onClose();
     } catch (err: any) {

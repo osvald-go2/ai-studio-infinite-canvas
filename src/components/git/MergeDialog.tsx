@@ -45,9 +45,9 @@ export function MergeDialog({
     setIsMerging(true);
     setError(null);
     try {
-      await gitService.mergeWorktree(projectDir, branch);
+      await gitService.mergeWorktree(projectDir, worktreePath, targetBranch || undefined);
       if (removeAfterMerge) {
-        await gitService.removeWorktree(projectDir, worktreePath);
+        await gitService.removeWorktree(projectDir, worktreePath, branch);
       }
       onSuccess();
       onClose();
