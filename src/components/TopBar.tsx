@@ -51,8 +51,8 @@ export function TopBar({
   );
 
   return (
-    <div className="h-14 border-b border-white/10 bg-black/20 backdrop-blur-md flex items-center justify-between pr-6 z-50 relative app-drag-region" style={{ paddingLeft: '78px' }}>
-      <div className="flex items-center gap-4">
+    <div className="h-14 border-b border-white/10 bg-black/20 backdrop-blur-md flex items-center justify-between pr-6 z-50 relative" style={{ paddingLeft: '86px', WebkitAppRegion: 'drag' } as React.CSSProperties}>
+      <div className="flex items-center gap-4" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
         <div className="font-semibold text-lg bg-gradient-to-r from-orange-400 to-rose-400 bg-clip-text text-transparent">
           AI Studio
         </div>
@@ -137,7 +137,7 @@ export function TopBar({
         </div>
       </div>
       
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
         {/* Search Bar */}
         <div className="relative" ref={searchRef}>
           <div className="relative">
