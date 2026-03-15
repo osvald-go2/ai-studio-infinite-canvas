@@ -73,3 +73,31 @@ export interface Session {
   height?: number;
   prevHeight?: number;
 }
+
+export interface DbProject {
+  id: number;
+  name: string;
+  path: string;
+  view_mode: string;
+  canvas_x: number;
+  canvas_y: number;
+  canvas_zoom: number;
+  last_opened_at: string;
+  created_at: string;
+}
+
+export interface DbSession {
+  id: string;
+  project_id: number;
+  title: string;
+  model: string;
+  status: string;
+  position_x: number;
+  position_y: number;
+  height: number | null;
+  git_branch: string | null;
+  worktree: string | null;
+  messages: string;
+  created_at: string;
+  updated_at: string;
+}
