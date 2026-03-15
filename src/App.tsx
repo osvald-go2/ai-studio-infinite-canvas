@@ -18,9 +18,14 @@ export default function App() {
   const [sessions, setSessions] = useState<Session[]>(initialSessions);
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
   const [focusedSessionId, setFocusedSessionId] = useState<string | null>(null);
-  
+
   // Git Review State
   const [reviewSessionId, setReviewSessionId] = useState<string | null>(null);
+
+  // Git Project State
+  const [projectDir, setProjectDir] = useState<string | null>(null);
+  const [isGitRepo, setIsGitRepo] = useState(false);
+  const [showGitPanel, setShowGitPanel] = useState(false);
 
   const handleCreateSession = (title: string, model: string, gitBranch: string, worktree: string, initialPrompt: string) => {
     const newSession: Session = {
@@ -47,7 +52,9 @@ export default function App() {
   const handleCommit = (message: string) => {
     if (reviewSessionId) {
       setSessions(sessions.map(s =>
-        s.id === reviewSessionId ? { ...s, diff: null, status: 'done' as const } : s
+        s.id === reviewSessionId
+          ? { ...s, diff: null, hasChanges: false, changeCount: 0, status: 'done' as const }
+          : s
       ));
     }
   };
@@ -55,7 +62,9 @@ export default function App() {
   const handleDiscard = () => {
     if (reviewSessionId) {
       setSessions(sessions.map(s =>
-        s.id === reviewSessionId ? { ...s, diff: null, status: 'inprocess' as const } : s
+        s.id === reviewSessionId
+          ? { ...s, diff: null, hasChanges: false, changeCount: 0, status: 'inprocess' as const }
+          : s
       ));
     }
   };

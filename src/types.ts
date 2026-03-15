@@ -22,7 +22,15 @@ export type ContentBlock =
   | { type: 'subagent'; agentId: string; task: string; status: 'launched' | 'working' | 'done' | 'error'; summary?: string; blocks?: ContentBlock[] }
   | { type: 'askuser'; questions: AskUserQuestion[]; submitted?: boolean }
   | { type: 'skill'; skill: string; args?: string; status: 'invoking' | 'done'; duration?: number }
-  | { type: 'file_changes'; title: string; files: FileChangeItem[] };
+  | { type: 'file_changes'; title: string; files: FileChangeItem[] }
+  | { type: 'form_table'; title?: string; columns: FormTableColumn[]; rows: Record<string, string>[]; submitLabel?: string };
+
+export interface FormTableColumn {
+  key: string;
+  label: string;
+  type?: 'text' | 'email' | 'select';
+  options?: string[];
+}
 
 export interface FileChangeItem {
   path: string;
@@ -60,6 +68,8 @@ export interface Session {
   position: { x: number; y: number };
   messages: Message[];
   diff?: GitDiff | null;
+  hasChanges?: boolean;
+  changeCount?: number;
   height?: number;
   prevHeight?: number;
 }

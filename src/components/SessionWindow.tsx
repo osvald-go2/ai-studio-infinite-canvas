@@ -5,6 +5,7 @@ import { generateMockDiff } from '../services/mockGit';
 import { MessageRenderer } from './message/MessageRenderer';
 import { STRUCTURED_MOCK_RESPONSES } from '../utils/mockResponses';
 import { backend } from '../services/backend';
+import { getStatusDotClass } from '../utils/statusColors';
 
 function isElectron(): boolean {
   return typeof window !== 'undefined' && window.aiBackend !== undefined;
@@ -108,6 +109,13 @@ export function SessionWindow({
       streamingMessageIdRef.current = null;
       isStreamingRef.current = false;
       blockMap.clear();
+      const updated = {
+        ...sessionRef.current,
+        status: 'review' as const,
+        diff: generateMockDiff()
+      };
+      sessionRef.current = updated;
+      onUpdate(updated);
     };
 
     const handleMessageError = (data: { session_id: string; error: { code: number; message: string } }) => {
@@ -324,10 +332,30 @@ export function SessionWindow({
     }
   };
 
-  const handleStop = () => {
+  const handleStop = async () => {
     isStreamingRef.current = false;
     setIsStreaming(false);
     setStreamingMessageId(null);
+    streamingMessageIdRef.current = null;
+
+    // Electron 模式：kill 当前 backend session 以中断流
+    if (isElectron() && backendSessionIdRef.current) {
+      try {
+        await backend.killSession(backendSessionIdRef.current);
+      } catch (e) {
+        console.error('[kill session error]', e);
+      }
+      backendSessionIdRef.current = null;
+      setBackendSessionId(null);
+    }
+
+    // 更新状态为 review（已有部分回复）
+    const updated = {
+      ...sessionRef.current,
+      status: 'review' as const,
+    };
+    sessionRef.current = updated;
+    onUpdate(updated);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -362,6 +390,17 @@ export function SessionWindow({
     }
   }, [isEditingTitle]);
 
+  // ESC 键中断 streaming
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isStreamingRef.current) {
+        handleStop();
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, []);
+
   const isTab = variant === 'tab';
 
   return (
@@ -386,17 +425,18 @@ export function SessionWindow({
         <div className={`session-header flex items-center justify-between p-4 px-6 select-none shrink-0 ${fullScreen ? 'border-b border-white/5 bg-black/20' : 'cursor-move bg-[#1E1814]/90'}`} onDoubleClick={onHeaderDoubleClick}>
           <div className="flex items-center gap-3">
             {onClose && (
-              <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors">
-                <X size={16} className="text-gray-400" />
+              <button
+                onClick={isStreaming ? handleStop : onClose}
+                className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+                  isStreaming
+                    ? 'bg-red-500/20 hover:bg-red-500/40 text-red-400'
+                    : 'bg-white/5 hover:bg-white/10'
+                }`}
+              >
+                <X size={16} className={isStreaming ? 'text-red-400' : 'text-gray-400'} />
               </button>
             )}
-            <span className={`w-2 h-2 rounded-full shrink-0 ${
-              isStreaming
-                ? 'bg-yellow-400 animate-pulse'
-                : session.status === 'review' || session.status === 'done'
-                  ? 'bg-green-400'
-                  : 'bg-gray-400'
-            }`} />
+            <span className={`w-2 h-2 rounded-full shrink-0 ${getStatusDotClass(session.status, isStreaming)}`} />
             {isEditingTitle ? (
               <input
                 ref={titleInputRef}
@@ -520,15 +560,28 @@ export function SessionWindow({
               </button>
               
               {/* Review Button */}
-              {session.status === 'review' && session.diff && (session.diff.totalAdditions > 0 || session.diff.totalDeletions > 0) && (
-                <button
-                  onClick={onOpenReview}
-                  className="flex items-center gap-1 bg-white/[0.06] hover:bg-white/10 px-2 py-1 rounded-lg text-[11px] font-mono transition-colors border border-white/[0.06]"
-                >
-                  <span className="text-green-400">+{session.diff.totalAdditions}</span>
-                  <span className="text-red-400">-{session.diff.totalDeletions}</span>
-                </button>
-              )}
+              {(() => {
+                const showReview = session.status === 'review' && (
+                  session.hasChanges ||
+                  (session.diff && (session.diff.totalAdditions > 0 || session.diff.totalDeletions > 0))
+                );
+                if (!showReview) return null;
+                return (
+                  <button
+                    onClick={onOpenReview}
+                    className="flex items-center gap-1 bg-white/[0.06] hover:bg-white/10 px-2 py-1 rounded-lg text-[11px] font-mono transition-colors border border-white/[0.06]"
+                  >
+                    {session.diff ? (
+                      <>
+                        <span className="text-green-400">+{session.diff.totalAdditions}</span>
+                        <span className="text-red-400">-{session.diff.totalDeletions}</span>
+                      </>
+                    ) : (
+                      <span className="text-amber-400">{session.changeCount ?? '~'} changes</span>
+                    )}
+                  </button>
+                );
+              })()}
             </div>
             {isStreaming ? (
               <button 
