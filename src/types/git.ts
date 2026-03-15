@@ -68,3 +68,10 @@ export interface BranchDiffStats {
   deletions: number
   base_branch: string
 }
+
+export interface TreeNode {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  children?: TreeNode[];
+}
