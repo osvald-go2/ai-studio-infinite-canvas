@@ -1,10 +1,14 @@
-import React, { useState } from 'react';
-import { X, GitBranch, FolderGit2, ChevronDown, MessageSquare, PenLine } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, GitBranch, FolderGit2, ChevronDown, MessageSquare, PenLine, GitFork } from 'lucide-react';
+import { gitService } from '../services/git';
+import type { BranchInfo } from '../types/git';
 
 interface NewSessionModalProps {
   isOpen: boolean;
   onClose: () => void;
   onCreate: (title: string, model: string, gitBranch: string, worktree: string, initialPrompt: string) => void;
+  projectDir?: string | null;
+  isGitRepo?: boolean;
 }
 
 const ClaudeIcon = () => (
@@ -38,24 +42,73 @@ const MODELS = [
   { id: 'gemini-cli', name: 'Gemini CLI', icon: GeminiIcon },
 ];
 
-export function NewSessionModal({ isOpen, onClose, onCreate }: NewSessionModalProps) {
+export function NewSessionModal({ isOpen, onClose, onCreate, projectDir, isGitRepo }: NewSessionModalProps) {
   const [title, setTitle] = useState('');
   const [model, setModel] = useState('claude-code');
   const [gitBranch, setGitBranch] = useState('main');
   const [worktree, setWorktree] = useState('default');
   const [initialPrompt, setInitialPrompt] = useState('');
 
+  // Worktree creation state
+  const [useWorktree, setUseWorktree] = useState(false);
+  const [baseBranch, setBaseBranch] = useState('main');
+  const [newBranch, setNewBranch] = useState('');
+  const [branches, setBranches] = useState<BranchInfo[]>([]);
+  const [isCreatingWorktree, setIsCreatingWorktree] = useState(false);
+  const [worktreeError, setWorktreeError] = useState<string | null>(null);
+
+  // Load branches when worktree mode is enabled
+  useEffect(() => {
+    if (useWorktree && isGitRepo && projectDir) {
+      gitService.branches(projectDir).then((result) => {
+        setBranches(result);
+        // Set default base branch to current branch if available
+        const currentBranch = result.find((b) => b.is_current);
+        if (currentBranch) setBaseBranch(currentBranch.name);
+      }).catch(() => {
+        setBranches([]);
+      });
+    }
+  }, [useWorktree, isGitRepo, projectDir]);
+
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
-    onCreate(title, model, gitBranch, worktree, initialPrompt);
+
+    let finalWorktree = worktree;
+    let finalBranch = gitBranch;
+
+    if (useWorktree && projectDir && newBranch.trim()) {
+      setIsCreatingWorktree(true);
+      setWorktreeError(null);
+      try {
+        // Derive a worktree path from the project dir and branch name
+        const sanitized = newBranch.trim().replace(/[^a-zA-Z0-9_-]/g, '-');
+        const worktreePath = `${projectDir}/../worktrees/${sanitized}`;
+        await gitService.createWorktree(projectDir, newBranch.trim(), worktreePath);
+        finalWorktree = worktreePath;
+        finalBranch = newBranch.trim();
+      } catch (err: any) {
+        setWorktreeError(err?.message ?? 'Failed to create worktree');
+        setIsCreatingWorktree(false);
+        return;
+      } finally {
+        setIsCreatingWorktree(false);
+      }
+    }
+
+    onCreate(title, model, finalBranch, finalWorktree, initialPrompt);
+    // Reset
     setTitle('');
     setModel('claude-code');
     setGitBranch('main');
     setWorktree('default');
     setInitialPrompt('');
+    setUseWorktree(false);
+    setNewBranch('');
+    setWorktreeError(null);
     onClose();
   };
 
@@ -106,32 +159,92 @@ export function NewSessionModal({ isOpen, onClose, onCreate }: NewSessionModalPr
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="relative">
-              <GitBranch size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-orange-400 pointer-events-none" />
-              <ChevronDown size={14} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
-              <select
-                value={gitBranch}
-                onChange={(e) => setGitBranch(e.target.value)}
-                className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-9 py-3.5 text-white outline-none focus:border-white/15 transition-all text-[15px] appearance-none cursor-pointer"
+          {/* Worktree Toggle — only if git repo is active */}
+          {isGitRepo && (
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setUseWorktree((v) => !v)}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  useWorktree ? 'bg-amber-500' : 'bg-white/10'
+                }`}
               >
-                <option value="main">main</option>
-                <option value="develop">develop</option>
-                <option value="feature">feature</option>
-                <option value="staging">staging</option>
-              </select>
+                <span
+                  className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${
+                    useWorktree ? 'translate-x-4.5' : 'translate-x-0.5'
+                  }`}
+                />
+              </button>
+              <div className="flex items-center gap-1.5">
+                <GitFork size={14} className="text-amber-400" />
+                <span className="text-sm text-gray-300">Create in Worktree</span>
+              </div>
             </div>
-            <div className="relative">
-              <FolderGit2 size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-emerald-400 pointer-events-none" />
-              <input
-                type="text"
-                value={worktree}
-                onChange={(e) => setWorktree(e.target.value)}
-                className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-4 py-3.5 text-white outline-none focus:border-white/15 transition-all text-[15px] placeholder-gray-600"
-                placeholder="Worktree path..."
-              />
+          )}
+
+          {/* Worktree branch fields */}
+          {useWorktree && isGitRepo ? (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="relative">
+                <GitBranch size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-orange-400 pointer-events-none" />
+                <ChevronDown size={14} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+                <select
+                  value={baseBranch}
+                  onChange={(e) => setBaseBranch(e.target.value)}
+                  className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-9 py-3.5 text-white outline-none focus:border-white/15 transition-all text-[15px] appearance-none cursor-pointer"
+                >
+                  {branches.length > 0 ? branches.map((b) => (
+                    <option key={b.name} value={b.name}>{b.name}</option>
+                  )) : (
+                    <option value="main">main</option>
+                  )}
+                </select>
+              </div>
+              <div className="relative">
+                <FolderGit2 size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-emerald-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={newBranch}
+                  onChange={(e) => setNewBranch(e.target.value)}
+                  className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-4 py-3.5 text-white outline-none focus:border-white/15 transition-all text-[15px] placeholder-gray-600"
+                  placeholder="New branch name..."
+                />
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="relative">
+                <GitBranch size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-orange-400 pointer-events-none" />
+                <ChevronDown size={14} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+                <select
+                  value={gitBranch}
+                  onChange={(e) => setGitBranch(e.target.value)}
+                  className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-9 py-3.5 text-white outline-none focus:border-white/15 transition-all text-[15px] appearance-none cursor-pointer"
+                >
+                  <option value="main">main</option>
+                  <option value="develop">develop</option>
+                  <option value="feature">feature</option>
+                  <option value="staging">staging</option>
+                </select>
+              </div>
+              <div className="relative">
+                <FolderGit2 size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-emerald-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={worktree}
+                  onChange={(e) => setWorktree(e.target.value)}
+                  className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-4 py-3.5 text-white outline-none focus:border-white/15 transition-all text-[15px] placeholder-gray-600"
+                  placeholder="Worktree path..."
+                />
+              </div>
+            </div>
+          )}
+
+          {worktreeError && (
+            <div className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-2">
+              {worktreeError}
+            </div>
+          )}
 
           <div>
             <label className="block text-[15px] font-medium text-white mb-3">Initial Prompt</label>
@@ -156,10 +269,10 @@ export function NewSessionModal({ isOpen, onClose, onCreate }: NewSessionModalPr
             </button>
             <button
               type="submit"
-              disabled={!title.trim()}
+              disabled={!title.trim() || isCreatingWorktree}
               className="px-5 py-2.5 rounded-xl text-sm font-medium bg-white/[0.12] hover:bg-white/[0.18] text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              Create Session
+              {isCreatingWorktree ? 'Creating worktree...' : 'Create Session'}
             </button>
           </div>
         </form>
