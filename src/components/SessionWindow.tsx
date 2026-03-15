@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Clock, Plus, MessageSquare, Send, Copy, ThumbsUp, ThumbsDown, ArrowUp, Square, Minus, Check, Pencil } from 'lucide-react';
+import { X, Clock, Plus, MessageSquare, Send, Copy, ThumbsUp, ThumbsDown, ArrowUp, Square, Minus, Check, Pencil, RotateCcw } from 'lucide-react';
 import { Session, Message, ContentBlock } from '../types';
 import { generateMockDiff } from '../services/mockGit';
 import { MessageRenderer } from './message/MessageRenderer';
 import { STRUCTURED_MOCK_RESPONSES } from '../utils/mockResponses';
 import { backend } from '../services/backend';
+import { gitService } from '../services/git';
 import { getStatusDotClass } from '../utils/statusColors';
 
 function isElectron(): boolean {
@@ -21,7 +22,8 @@ export function SessionWindow({
   height,
   animateHeight = false,
   onHeaderDoubleClick,
-  variant = 'default'
+  variant = 'default',
+  projectDir
 }: {
   session: Session,
   onUpdate: (s: Session) => void,
@@ -31,7 +33,8 @@ export function SessionWindow({
   height?: number,
   animateHeight?: boolean,
   onHeaderDoubleClick?: (e: React.MouseEvent) => void,
-  variant?: 'default' | 'tab'
+  variant?: 'default' | 'tab',
+  projectDir?: string | null
 }) {
   const [inputValue, setInputValue] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -102,17 +105,34 @@ export function SessionWindow({
       }
     };
 
-    const handleMessageComplete = (data: { session_id: string }) => {
+    const handleMessageComplete = async (data: { session_id: string }) => {
       if (data.session_id !== backendSessionIdRef.current) return;
       setIsStreaming(false);
       setStreamingMessageId(null);
       streamingMessageIdRef.current = null;
       isStreamingRef.current = false;
       blockMap.clear();
+
+      // Detect real git changes in Electron mode
+      const workingDir = sessionRef.current.worktree ?? projectDir ?? null;
+      let hasChanges = false;
+      let changeCount = 0;
+      if (workingDir) {
+        try {
+          const changes = await gitService.changes(workingDir);
+          hasChanges = changes.length > 0;
+          changeCount = changes.length;
+        } catch {
+          // Ignore git errors — fall through to mock diff
+        }
+      }
+
       const updated = {
         ...sessionRef.current,
         status: 'review' as const,
-        diff: generateMockDiff()
+        hasChanges,
+        changeCount,
+        diff: hasChanges ? null : generateMockDiff(),
       };
       sessionRef.current = updated;
       onUpdate(updated);
@@ -498,27 +518,36 @@ export function SessionWindow({
             <ComplexMockContent />
           ) : (
             <div className="space-y-6">
-              {session.messages.map(msg => (
-                <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                  <div className={`${
-                    msg.role === 'user'
-                      ? 'max-w-[85%] bg-white/10 text-gray-200 rounded-[24px] px-5 py-3.5'
-                      : `text-gray-300 w-full${isTab ? ' pl-1' : ''}`
-                  }`}>
-                    {msg.role === 'user' ? (
-                      <div className="whitespace-pre-wrap leading-relaxed text-[15px]">
-                        {msg.content}
-                      </div>
-                    ) : (
-                      <MessageRenderer
-                        blocks={msg.blocks}
-                        fallbackContent={msg.content}
-                        isStreaming={isStreaming && streamingMessageId === msg.id}
-                      />
+              {session.messages.map(msg => {
+                const isMsgStreaming = isStreaming && streamingMessageId === msg.id;
+                return (
+                  <div key={msg.id} className={`group/msg flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                    <div className={`${
+                      msg.role === 'user'
+                        ? 'max-w-[85%] bg-white/10 text-gray-200 rounded-[24px] px-5 py-3.5'
+                        : `text-gray-300 w-full${isTab ? ' pl-1' : ''}`
+                    }`}>
+                      {msg.role === 'user' ? (
+                        <div className="whitespace-pre-wrap leading-relaxed text-[15px]">
+                          {msg.content}
+                        </div>
+                      ) : (
+                        <>
+                          {isMsgStreaming && !hasVisibleContent(msg) && <ThinkingIndicator />}
+                          <MessageRenderer
+                            blocks={msg.blocks}
+                            fallbackContent={msg.content}
+                            isStreaming={isMsgStreaming}
+                          />
+                        </>
+                      )}
+                    </div>
+                    {msg.role === 'assistant' && !isMsgStreaming && (msg.content || (msg.blocks && msg.blocks.length > 0)) && (
+                      <MessageActions message={msg} />
                     )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -602,6 +631,95 @@ export function SessionWindow({
           </div>
         </div>
       </div>}
+    </div>
+  );
+}
+
+/** Check if a message has any visible content (excluding system status blocks) */
+function hasVisibleContent(msg: Message): boolean {
+  if (msg.content) return true;
+  if (!msg.blocks || msg.blocks.length === 0) return false;
+  return msg.blocks.some(
+    b => !(b.type === 'text' && b.content.startsWith('Connected:'))
+  );
+}
+
+function ThinkingIndicator() {
+  return (
+    <div className="flex items-center gap-1.5 py-2">
+      <span className="thinking-dot w-1.5 h-1.5 rounded-full bg-gray-400" />
+      <span className="thinking-dot w-1.5 h-1.5 rounded-full bg-gray-400" />
+      <span className="thinking-dot w-1.5 h-1.5 rounded-full bg-gray-400" />
+    </div>
+  );
+}
+
+function MessageActions({ message }: { message: Message }) {
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [likedId, setLikedId] = useState<string | null>(null);
+  const [dislikedId, setDislikedId] = useState<string | null>(null);
+
+  const handleCopy = () => {
+    // Extract text content from blocks or fallback to message content
+    let text = message.content;
+    if (message.blocks && message.blocks.length > 0) {
+      text = message.blocks
+        .map(b => {
+          if (b.type === 'text') return b.content;
+          if (b.type === 'code') return b.code;
+          return '';
+        })
+        .filter(Boolean)
+        .join('\n\n');
+    }
+    navigator.clipboard.writeText(text);
+    setCopiedId(message.id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleLike = () => {
+    setLikedId(likedId === message.id ? null : message.id);
+    setDislikedId(null);
+  };
+
+  const handleDislike = () => {
+    setDislikedId(dislikedId === message.id ? null : message.id);
+    setLikedId(null);
+  };
+
+  const isCopied = copiedId === message.id;
+  const isLiked = likedId === message.id;
+  const isDisliked = dislikedId === message.id;
+
+  return (
+    <div className="flex items-center gap-1 mt-2 opacity-0 group-hover/msg:opacity-100 transition-opacity">
+      <button
+        onClick={handleCopy}
+        className={`p-1.5 rounded-md transition-colors ${isCopied ? 'text-emerald-400' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
+        title="Copy"
+      >
+        {isCopied ? <Check size={15} /> : <Copy size={15} />}
+      </button>
+      <button
+        onClick={handleLike}
+        className={`p-1.5 rounded-md transition-colors ${isLiked ? 'text-emerald-400' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
+        title="Good response"
+      >
+        <ThumbsUp size={15} />
+      </button>
+      <button
+        onClick={handleDislike}
+        className={`p-1.5 rounded-md transition-colors ${isDisliked ? 'text-orange-400' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
+        title="Bad response"
+      >
+        <ThumbsDown size={15} />
+      </button>
+      <button
+        className="p-1.5 rounded-md text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-colors"
+        title="Retry"
+      >
+        <RotateCcw size={15} />
+      </button>
     </div>
   );
 }
