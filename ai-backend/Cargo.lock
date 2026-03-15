@@ -22,6 +22,7 @@ dependencies = [
  "chrono",
  "dirs",
  "futures",
+ "libc",
  "notify",
  "reqwest",
  "rusqlite",
