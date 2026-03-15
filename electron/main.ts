@@ -13,7 +13,7 @@ function createWindow(): void {
     width: 1600,
     height: 1000,
     webPreferences: {
-      preload: path.join(__dirname, '../preload/index.js'),
+      preload: path.join(__dirname, '../preload/index.mjs'),
       sandbox: false,
     },
     titleBarStyle: 'hiddenInset',
