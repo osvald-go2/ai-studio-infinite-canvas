@@ -11,6 +11,7 @@ import { TopBar } from './components/TopBar';
 import { NewSessionModal } from './components/NewSessionModal';
 import { GitReviewPanel } from './components/git/GitReviewPanel';
 import { GitPanel } from './components/git/GitPanel';
+import { TerminalPanel } from './components/terminal/TerminalPanel';
 import { GitProvider } from './contexts/GitProvider';
 import { Session, SessionStatus, DbProject, DbSession } from './types';
 import { backend } from './services/backend';
@@ -89,7 +90,12 @@ export default function App() {
   const [viewMode, setViewMode] = useState<'canvas' | 'board' | 'tab'>('canvas');
   const [sessions, setSessions] = useState<Session[]>(initialSessions);
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
+  const [copyTitle, setCopyTitle] = useState('');
   const [focusedSessionId, setFocusedSessionId] = useState<string | null>(null);
+
+  // Terminal State
+  const [showTerminal, setShowTerminal] = useState(false);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   // Git Review State
   const [reviewFilePath, setReviewFilePath] = useState<string | null>(null);
@@ -110,6 +116,24 @@ export default function App() {
   const loadedSessionIdsRef = useRef<Set<string>>(new Set());
   const canvasWidthRef = useRef(window.innerWidth);
   const isElectronApp = typeof window !== 'undefined' && (window as any).aiBackend !== undefined;
+
+  // Compute terminal cwd based on active session's worktree
+  const activeSession = sessions.find(s => s.id === activeSessionId);
+  const terminalCwd = (activeSession?.worktree && activeSession.worktree !== 'default')
+    ? activeSession.worktree
+    : projectDir ?? '';
+
+  // Keyboard shortcut: Ctrl/Cmd + ` to toggle terminal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === '`') {
+        e.preventDefault();
+        setShowTerminal(v => !v);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Re-check git repo status when projectDir changes
   useEffect(() => {
@@ -166,6 +190,7 @@ export default function App() {
         messages: JSON.stringify(session.messages),
         created_at: sessionCreatedAtRef.current[session.id],
         updated_at: now,
+        claude_session_id: session.claudeSessionId ?? null,
       };
       return backend.saveSession(dbSession);
     }));
@@ -248,6 +273,7 @@ export default function App() {
           messages: JSON.stringify(session.messages),
           created_at: sessionCreatedAtRef.current[session.id],
           updated_at: now,
+          claude_session_id: session.claudeSessionId ?? null,
         };
         backend.saveSession(dbSession).catch(console.error);
       });
@@ -293,26 +319,53 @@ export default function App() {
   }, [sessions, currentProject]);
 
   const handleCreateSession = (title: string, model: string, gitBranch: string, worktree: string, initialPrompt: string) => {
-    setSessions(prev => {
-      const position = findNextGridPosition(prev, canvasWidthRef.current);
-      const newSession: Session = {
-        id: Date.now().toString(),
-        title,
-        model,
-        gitBranch,
-        worktree,
-        status: 'inbox',
-        position,
-        messages: initialPrompt.trim() ? [{
-          id: Date.now().toString() + '-init',
-          role: 'user',
-          content: initialPrompt.trim(),
-          type: 'text',
-          timestamp: Date.now()
-        }] : []
+    const position = findNextGridPosition(sessions, canvasWidthRef.current);
+    const now = new Date().toISOString();
+    const newSession: Session = {
+      id: Date.now().toString(),
+      title,
+      model,
+      gitBranch,
+      worktree,
+      status: 'inbox',
+      position,
+      messages: initialPrompt.trim() ? [{
+        id: Date.now().toString() + '-init',
+        role: 'user',
+        content: initialPrompt.trim(),
+        type: 'text',
+        timestamp: Date.now()
+      }] : []
+    };
+
+    setSessions(prev => [...prev, newSession]);
+
+    // Immediately persist to DB so the session survives page reloads
+    if (isElectronApp && currentProject) {
+      sessionCreatedAtRef.current[newSession.id] = now;
+      const dbSession: DbSession = {
+        id: newSession.id,
+        project_id: currentProject.id,
+        title: newSession.title,
+        model: newSession.model,
+        status: newSession.status,
+        position_x: newSession.position.x,
+        position_y: newSession.position.y,
+        height: newSession.height ?? null,
+        git_branch: newSession.gitBranch ?? null,
+        worktree: newSession.worktree ?? null,
+        messages: JSON.stringify(newSession.messages),
+        created_at: now,
+        updated_at: now,
+        claude_session_id: newSession.claudeSessionId ?? null,
       };
-      return [...prev, newSession];
-    });
+      backend.saveSession(dbSession).catch(console.error);
+    }
+  };
+
+  const handleCopySession = (title: string) => {
+    setCopyTitle(title + '_copy');
+    setIsNewModalOpen(true);
   };
 
   const handleLocateSession = (id: string) => {
@@ -366,6 +419,8 @@ export default function App() {
         onLocateSession={handleLocateSession}
         showGitPanel={showGitPanel}
         onToggleGitPanel={() => setShowGitPanel((v) => !v)}
+        showTerminal={showTerminal}
+        onToggleTerminal={() => setShowTerminal(v => !v)}
         onOpenDirectory={handleOpenDirectory}
         projectDir={projectDir}
         currentProject={currentProject}
@@ -374,52 +429,73 @@ export default function App() {
         isSwitchingProject={isSwitchingProject}
       />
 
-      <GitProvider projectDir={projectDir}>
-        <div className="flex-1 min-h-0 relative z-10 flex overflow-hidden">
-          <div className="flex-1 min-w-0 min-h-0">
-            {viewMode === 'canvas' ? (
-              <CanvasView
-                sessions={sessions}
-                setSessions={setSessions}
-                focusedSessionId={focusedSessionId}
-                projectDir={projectDir}
-                transform={canvasTransform}
-                onTransformChange={setCanvasTransform}
-                onCanvasResize={(w) => { canvasWidthRef.current = w; }}
-              />
-            ) : viewMode === 'board' ? (
-              <BoardView
-                sessions={sessions}
-                setSessions={setSessions}
-                focusedSessionId={focusedSessionId}
-                projectDir={projectDir}
-              />
-            ) : (
-              <TabView
-                sessions={sessions}
-                setSessions={setSessions}
-                focusedSessionId={focusedSessionId}
-                projectDir={projectDir}
+      <GitProvider projectDir={projectDir} overrideDir={(activeSession?.worktree && activeSession.worktree !== 'default') ? activeSession.worktree : null}>
+        <div className="flex-1 min-h-0 relative z-10 flex flex-col overflow-hidden">
+          {/* Upper area: content + Git sidebar */}
+          <div className="flex-1 min-h-0 flex overflow-hidden">
+            <div className="flex-1 min-w-0 min-h-0">
+              {viewMode === 'canvas' ? (
+                <CanvasView
+                  sessions={sessions}
+                  setSessions={setSessions}
+                  focusedSessionId={focusedSessionId}
+                  projectDir={projectDir}
+                  transform={canvasTransform}
+                  onTransformChange={setCanvasTransform}
+                  onCanvasResize={(w) => { canvasWidthRef.current = w; }}
+                  onToggleGitPanel={() => setShowGitPanel(true)}
+                  onCopySession={handleCopySession}
+                  onActiveSessionChange={(id) => setActiveSessionId(id)}
+                />
+              ) : viewMode === 'board' ? (
+                <BoardView
+                  sessions={sessions}
+                  setSessions={setSessions}
+                  focusedSessionId={focusedSessionId}
+                  projectDir={projectDir}
+                  onToggleGitPanel={() => setShowGitPanel(true)}
+                  onCopySession={handleCopySession}
+                  onActiveSessionChange={(id) => setActiveSessionId(id)}
+                />
+              ) : (
+                <TabView
+                  sessions={sessions}
+                  setSessions={setSessions}
+                  focusedSessionId={focusedSessionId}
+                  projectDir={projectDir}
+                  onToggleGitPanel={() => setShowGitPanel(true)}
+                  onCopySession={handleCopySession}
+                  onActiveSessionChange={(id) => setActiveSessionId(id)}
+                />
+              )}
+            </div>
+
+            {/* Git Panel — side panel */}
+            {projectDir && (
+              <GitPanel
+                isOpen={showGitPanel}
+                onClose={() => setShowGitPanel(false)}
+                onOpenDiff={(filePath) => setReviewFilePath(filePath)}
               />
             )}
           </div>
 
-          {/* Git Panel — side panel */}
-          {projectDir && (
-            <GitPanel
-              isOpen={showGitPanel}
-              onClose={() => setShowGitPanel(false)}
-              onOpenDiff={(filePath) => setReviewFilePath(filePath)}
+          {/* Lower area: Terminal panel */}
+          {showTerminal && (
+            <TerminalPanel
+              onClose={() => setShowTerminal(false)}
+              cwd={terminalCwd}
             />
           )}
         </div>
 
         <NewSessionModal
           isOpen={isNewModalOpen}
-          onClose={() => setIsNewModalOpen(false)}
+          onClose={() => { setIsNewModalOpen(false); setCopyTitle(''); }}
           onCreate={handleCreateSession}
           projectDir={projectDir}
           isGitRepo={isGitRepo}
+          defaultTitle={copyTitle}
         />
 
         <GitReviewPanel

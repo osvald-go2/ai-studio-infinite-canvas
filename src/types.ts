@@ -58,6 +58,7 @@ export interface Session {
   changeCount?: number;
   height?: number;
   prevHeight?: number;
+  claudeSessionId?: string;
 }
 
 export interface DbProject {
@@ -86,6 +87,7 @@ export interface DbSession {
   messages: string;
   created_at: string;
   updated_at: string;
+  claude_session_id: string | null;
 }
 
 export interface SkillInfo {
