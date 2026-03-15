@@ -10,6 +10,7 @@ use super::types::{parse_line, ClaudeJson, UserInputContent, UserInputMessage};
 pub struct ClaudeProcess {
     stdin: Arc<Mutex<tokio::process::ChildStdin>>,
     pub child: Child,
+    cached_pid: Option<u32>,
 }
 
 impl ClaudeProcess {
@@ -40,6 +41,7 @@ impl ClaudeProcess {
             .stderr(Stdio::piped());
 
         let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn claude: {}", e))?;
+        let cached_pid = child.id();
 
         let stdin = child.stdin.take()
             .ok_or_else(|| "Failed to open stdin".to_string())?;
@@ -87,6 +89,7 @@ impl ClaudeProcess {
         let process = ClaudeProcess {
             stdin: Arc::new(Mutex::new(stdin)),
             child,
+            cached_pid,
         };
 
         Ok((process, rx))
@@ -113,6 +116,18 @@ impl ClaudeProcess {
         stdin.flush().await
             .map_err(|e| format!("stdin flush error: {}", e))?;
 
+        Ok(())
+    }
+
+    /// Interrupt the claude process via SIGINT (Unix only).
+    /// Does not terminate the process — just stops current generation.
+    pub fn interrupt(&self) -> Result<(), String> {
+        let pid = self.cached_pid
+            .ok_or_else(|| "process already exited".to_string())?;
+        let ret = unsafe { libc::kill(pid as i32, libc::SIGINT) };
+        if ret != 0 {
+            return Err(format!("SIGINT failed with errno: {}", std::io::Error::last_os_error()));
+        }
         Ok(())
     }
 
