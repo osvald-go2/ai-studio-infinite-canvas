@@ -349,6 +349,73 @@ pub async fn handle_request(
             Response::ok(req.id, json!({"session_id": session_id}))
         }
 
+        // ── project persistence ────────────────────────────────────────────
+
+        "project.open" => {
+            let path = req.params.get("path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            if path.is_empty() {
+                return ErrorResponse::new(req.id, 1002, "path is required".to_string());
+            }
+
+            let name = std::path::Path::new(&path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+
+            let project = match db::projects::get_by_path(database, &path) {
+                Ok(Some(p)) => {
+                    let _ = db::projects::touch(database, p.id);
+                    db::projects::get_by_id(database, p.id)
+                        .unwrap_or(Some(p.clone()))
+                        .unwrap_or(p)
+                }
+                Ok(None) => {
+                    match db::projects::create(database, &name, &path) {
+                        Ok(p) => p,
+                        Err(e) => return ErrorResponse::new(req.id, 1003, e),
+                    }
+                }
+                Err(e) => return ErrorResponse::new(req.id, 1003, e),
+            };
+
+            session_manager.set_working_dir(path);
+
+            Response::ok(req.id, serde_json::to_value(&project).unwrap())
+        }
+
+        "project.list" => {
+            match db::projects::list(database) {
+                Ok(projects) => Response::ok(req.id, json!({ "projects": projects })),
+                Err(e) => ErrorResponse::new(req.id, 1003, e),
+            }
+        }
+
+        "project.update" => {
+            let project: db::Project = match serde_json::from_value(req.params.clone()) {
+                Ok(p) => p,
+                Err(e) => return ErrorResponse::new(req.id, 1002, format!("invalid params: {e}")),
+            };
+            match db::projects::update(database, &project) {
+                Ok(()) => Response::ok(req.id, json!({ "ok": true })),
+                Err(e) => ErrorResponse::new(req.id, 1003, e),
+            }
+        }
+
+        "project.delete" => {
+            let id = req.params.get("id")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            match db::projects::delete(database, id) {
+                Ok(()) => Response::ok(req.id, json!({ "ok": true })),
+                Err(e) => ErrorResponse::new(req.id, 1003, e),
+            }
+        }
+
         _ => ErrorResponse::new(req.id, 1000, format!("unknown method: {}", req.method)),
     }
 }
