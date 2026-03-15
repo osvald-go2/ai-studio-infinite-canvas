@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { X, Clock, Plus, MessageSquare, Send, Copy, ThumbsUp, ThumbsDown, ArrowUp, Square, Minus, Check, Pencil, RotateCcw, GitBranch, GitFork, Trash2 } from 'lucide-react';
 import { Session, Message, ContentBlock, SkillInfo } from '../types';
-import { generateMockDiff } from '../services/mockGit';
 import { MessageRenderer } from './message/MessageRenderer';
 import { STRUCTURED_MOCK_RESPONSES } from '../utils/mockResponses';
 import { backend } from '../services/backend';
@@ -20,7 +19,6 @@ export function SessionWindow({
   onUpdate,
   onClose,
   onDelete,
-  onOpenReview,
   fullScreen = false,
   height,
   animateHeight = false,
@@ -32,7 +30,6 @@ export function SessionWindow({
   onUpdate: (s: Session) => void,
   onClose?: () => void,
   onDelete?: () => void,
-  onOpenReview?: () => void,
   fullScreen?: boolean,
   height?: number,
   animateHeight?: boolean,
@@ -163,7 +160,7 @@ export function SessionWindow({
           hasChanges = changes.length > 0;
           changeCount = changes.length;
         } catch {
-          // Ignore git errors — fall through to mock diff
+          // Ignore git errors
         }
       }
 
@@ -172,7 +169,6 @@ export function SessionWindow({
         status: 'review' as const,
         hasChanges,
         changeCount,
-        diff: hasChanges ? null : generateMockDiff(),
       };
       sessionRef.current = updated;
       onUpdate(updated);
@@ -268,7 +264,6 @@ export function SessionWindow({
           onUpdate({
             ...sessionRef.current,
             status: 'review',
-            diff: generateMockDiff()
           });
         }
       };
@@ -347,7 +342,6 @@ export function SessionWindow({
       onUpdate({
         ...sessionRef.current,
         status: 'review',
-        diff: generateMockDiff()
       });
     }
   };
@@ -879,29 +873,12 @@ export function SessionWindow({
                 {isTab ? 'Claude' : 'Claude Opus 4.6'}
               </button>
               
-              {/* Review Button */}
-              {(() => {
-                const showReview = session.status === 'review' && (
-                  session.hasChanges ||
-                  (session.diff && (session.diff.totalAdditions > 0 || session.diff.totalDeletions > 0))
-                );
-                if (!showReview) return null;
-                return (
-                  <button
-                    onClick={onOpenReview}
-                    className="flex items-center gap-1 bg-white/[0.06] hover:bg-white/10 px-2 py-1 rounded-lg text-[11px] font-mono transition-colors border border-white/[0.06]"
-                  >
-                    {session.diff ? (
-                      <>
-                        <span className="text-green-400">+{session.diff.totalAdditions}</span>
-                        <span className="text-red-400">-{session.diff.totalDeletions}</span>
-                      </>
-                    ) : (
-                      <span className="text-amber-400">{session.changeCount ?? '~'} changes</span>
-                    )}
-                  </button>
-                );
-              })()}
+              {/* Changes indicator */}
+              {session.status === 'review' && session.hasChanges && (
+                <span className="flex items-center gap-1 bg-white/[0.06] px-2 py-1 rounded-lg text-[11px] font-mono border border-white/[0.06]">
+                  <span className="text-amber-400">{session.changeCount ?? '~'} changes</span>
+                </span>
+              )}
             </div>
             {isStreaming ? (
               <button 
