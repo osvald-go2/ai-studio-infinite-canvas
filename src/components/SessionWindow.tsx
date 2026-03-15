@@ -8,6 +8,7 @@ import { gitService } from '../services/git';
 import { getStatusDotClass } from '../utils/statusColors';
 import { SkillPicker } from './SkillPicker';
 import { scanSkills } from '../services/skillScanner';
+import { useGit } from '../contexts/GitProvider';
 
 function isElectron(): boolean {
   return typeof window !== 'undefined' && window.aiBackend !== undefined;
@@ -24,7 +25,9 @@ export function SessionWindow({
   animateHeight = false,
   onHeaderDoubleClick,
   variant = 'default',
-  projectDir
+  projectDir,
+  onToggleGitPanel,
+  onCopySession
 }: {
   session: Session,
   onUpdate: (s: Session) => void,
@@ -35,7 +38,9 @@ export function SessionWindow({
   animateHeight?: boolean,
   onHeaderDoubleClick?: (e: React.MouseEvent) => void,
   variant?: 'default' | 'tab',
-  projectDir?: string | null
+  projectDir?: string | null,
+  onToggleGitPanel?: () => void,
+  onCopySession?: (title: string) => void
 }) {
   const [inputValue, setInputValue] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -50,6 +55,27 @@ export function SessionWindow({
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+
+  const { info, changes } = useGit();
+  const [worktreeAdditions, setWorktreeAdditions] = useState(0);
+  const [worktreeDeletions, setWorktreeDeletions] = useState(0);
+  const hasWorktree = session.worktree && session.worktree !== 'default';
+
+  useEffect(() => {
+    if (!hasWorktree) return;
+    let cancelled = false;
+    gitService.changes(session.worktree!).then(wtChanges => {
+      if (cancelled) return;
+      setWorktreeAdditions(wtChanges.reduce((sum, c) => sum + c.additions, 0));
+      setWorktreeDeletions(wtChanges.reduce((sum, c) => sum + c.deletions, 0));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [hasWorktree, session.worktree, session.messages.length]);
+
+  const globalAdditions = changes.reduce((sum, c) => sum + c.additions, 0);
+  const globalDeletions = changes.reduce((sum, c) => sum + c.deletions, 0);
+  const totalAdditions = hasWorktree ? worktreeAdditions : globalAdditions;
+  const totalDeletions = hasWorktree ? worktreeDeletions : globalDeletions;
 
   const isStreamingRef = useRef(false);
   const historyRef = useRef<HTMLDivElement>(null);
@@ -206,6 +232,31 @@ export function SessionWindow({
     backend.onBlockStop(handleBlockStop);
     backend.onMessageComplete(handleMessageComplete);
     backend.onMessageError(handleMessageError);
+
+    const handleSessionInit = (data: { session_id: string; claude_session_id: string }) => {
+      if (data.session_id === backendSessionIdRef.current) {
+        const updated = {
+          ...sessionRef.current,
+          claudeSessionId: data.claude_session_id,
+        };
+        sessionRef.current = updated;
+        onUpdate(updated);
+      }
+    };
+    backend.onSessionInit(handleSessionInit);
+
+    const handleSidecarRestarted = () => {
+      backendSessionIdRef.current = null;
+      setBackendSessionId(null);
+    };
+    backend.onSidecarRestarted(handleSidecarRestarted);
+
+    return () => {
+      if (isElectron()) {
+        window.aiBackend.off('session.init', handleSessionInit);
+        window.aiBackend.off('sidecar.restarted', handleSidecarRestarted);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -240,7 +291,7 @@ export function SessionWindow({
 
         if (isElectron()) {
           if (!backendSessionIdRef.current) {
-            const sid = await backend.createSession(session.model);
+            const sid = await backend.createSession(session.model, sessionRef.current.claudeSessionId);
             backendSessionIdRef.current = sid;
             setBackendSessionId(sid);
           }
@@ -316,7 +367,7 @@ export function SessionWindow({
     if (isElectron()) {
       // Create backend session if not already created
       if (!backendSessionIdRef.current) {
-        const sid = await backend.createSession(session.model);
+        const sid = await backend.createSession(session.model, sessionRef.current.claudeSessionId);
         backendSessionIdRef.current = sid;
         setBackendSessionId(sid);
       }
@@ -324,11 +375,32 @@ export function SessionWindow({
       try {
         await backend.sendMessage(backendSessionIdRef.current, currentInput);
       } catch (e) {
-        setIsStreaming(false);
-        setStreamingMessageId(null);
-        streamingMessageIdRef.current = null;
-        isStreamingRef.current = false;
-        console.error('[send error]', e);
+        console.warn('[send error, attempting resume]', e);
+        backendSessionIdRef.current = null;
+        setBackendSessionId(null);
+        try {
+          const sid = await backend.createSession(session.model, sessionRef.current.claudeSessionId);
+          backendSessionIdRef.current = sid;
+          setBackendSessionId(sid);
+          await backend.sendMessage(sid, currentInput);
+        } catch (retryError) {
+          setIsStreaming(false);
+          setStreamingMessageId(null);
+          streamingMessageIdRef.current = null;
+          isStreamingRef.current = false;
+          console.error('[send retry failed]', retryError);
+          // Show error to user via an error block in the assistant message
+          const errorMsg = retryError instanceof Error ? retryError.message : 'Unknown error';
+          const updated = {
+            ...sessionRef.current,
+            status: 'review' as const,
+            messages: sessionRef.current.messages.map(m =>
+              m.id === aiMsgId ? { ...m, blocks: [{ type: 'text' as const, content: `Connection failed: ${errorMsg}. Please try again.` }] } : m
+            ),
+          };
+          sessionRef.current = updated;
+          onUpdate(updated);
+        }
       }
     } else {
       // Mock fallback for browser dev
@@ -397,15 +469,14 @@ export function SessionWindow({
     setStreamingMessageId(null);
     streamingMessageIdRef.current = null;
 
-    // Electron 模式：kill 当前 backend session 以中断流
+    // Electron 模式：interrupt 当前 backend session 以中断流
     if (isElectron() && backendSessionIdRef.current) {
       try {
-        await backend.killSession(backendSessionIdRef.current);
+        await backend.interruptSession(backendSessionIdRef.current);
       } catch (e) {
-        console.error('[kill session error]', e);
+        console.error('[interrupt session error]', e);
       }
-      backendSessionIdRef.current = null;
-      setBackendSessionId(null);
+      // Do NOT clear backendSessionIdRef — process stays alive
     }
 
     // 更新状态为 review（已有部分回复）
@@ -455,11 +526,13 @@ export function SessionWindow({
     inputValueRef.current = val;
 
     const isFirstMessage = session.messages.length === 0;
+    console.log(`[SessionWindow] handleInputChange: val="${val}", isFirstMessage=${isFirstMessage}, skills.length=${skills.length}, model=${session.model}, projectDir=${projectDir}`);
 
     if (isFirstMessage && val.startsWith('/') && val.length >= 1) {
       let currentSkills = skills;
       if (currentSkills.length === 0) {
         currentSkills = await scanSkills(session.model, projectDir);
+        console.log(`[SessionWindow] scanSkills returned ${currentSkills.length} skills`);
         if (!inputValueRef.current.startsWith('/')) return;
         setSkills(currentSkills);
       }
@@ -592,7 +665,13 @@ export function SessionWindow({
                 </div>
               )}
             </div>
-            <button className="hover:text-gray-200 transition-colors"><Plus size={18} /></button>
+            <button
+              className="hover:text-gray-200 transition-colors"
+              title="复制 session"
+              onClick={() => onCopySession?.(session.title)}
+            >
+              <Copy size={18} />
+            </button>
             {onDelete && (
               <button
                 onClick={() => { if (window.confirm('确定要删除这个 session 吗？')) onDelete(); }}
@@ -659,10 +738,10 @@ export function SessionWindow({
                 </button>
               </div>
             )}
-            {session.gitBranch && session.gitBranch !== 'main' && (
+            {(session.gitBranch || info.branch) && (
               <div className="flex items-center gap-1 bg-orange-500/10 border border-orange-500/20 rounded-lg px-2 py-0.5 shrink-0">
                 <GitBranch size={12} className="text-orange-400" />
-                <span className="text-[11px] font-mono text-orange-300 truncate max-w-[120px]">{session.gitBranch}</span>
+                <span className="text-[11px] font-mono text-orange-300 truncate max-w-[120px]">{session.gitBranch || info.branch}</span>
               </div>
             )}
             {session.worktree && session.worktree !== 'default' && (
@@ -717,7 +796,14 @@ export function SessionWindow({
                 </div>
               )}
             </div>
-            <button className="hover:text-gray-200 transition-colors"><Plus size={20} /></button>
+            <button
+              className="hover:text-gray-200 transition-colors"
+              title="复制 session"
+              onClick={(e) => { e.stopPropagation(); onCopySession?.(session.title); }}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <Copy size={20} />
+            </button>
             {onDelete && (
               <button
                 onClick={(e) => {
@@ -836,8 +922,8 @@ export function SessionWindow({
                 className="absolute inset-0 px-4 py-3 pointer-events-none whitespace-pre-wrap text-sm leading-normal"
                 aria-hidden
               >
-                <span className="bg-amber-500/15 text-white rounded px-0.5">/{selectedSkill}</span>
-                <span className="text-transparent">{inputValue.slice(selectedSkill.length + 1)}</span>
+                <span className="bg-amber-500/15 text-white rounded" style={{ boxDecorationBreak: 'clone', paddingBlock: '1px' }}>/{selectedSkill}</span>
+                <span className="text-white">{inputValue.slice(selectedSkill.length + 1)}</span>
               </div>
             )}
             <textarea
@@ -872,7 +958,18 @@ export function SessionWindow({
               }`}>
                 {isTab ? 'Claude' : 'Claude Opus 4.6'}
               </button>
-              
+
+              {(totalAdditions > 0 || totalDeletions > 0) && (
+                <button
+                  onClick={onToggleGitPanel}
+                  className="flex items-center gap-0.5 bg-white/[0.06] border border-white/[0.06] rounded-full px-2.5 py-1 shrink-0 hover:bg-white/10 transition-colors cursor-pointer"
+                >
+                  <span className="text-[11px] font-mono font-medium text-green-400/80">+{totalAdditions}</span>
+                  <span className="text-white/15 mx-0.5">│</span>
+                  <span className="text-[11px] font-mono font-medium text-red-400/80">−{totalDeletions}</span>
+                </button>
+              )}
+
               {/* Changes indicator */}
               {session.status === 'review' && session.hasChanges && (
                 <span className="flex items-center gap-1 bg-white/[0.06] px-2 py-1 rounded-lg text-[11px] font-mono border border-white/[0.06]">
