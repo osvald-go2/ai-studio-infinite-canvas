@@ -7,6 +7,7 @@ mod router;
 mod session;
 mod claude;
 mod normalizer;
+mod git;
 
 use protocol::{ErrorResponse, OutgoingMessage, Request};
 use session::manager::SessionManager;
