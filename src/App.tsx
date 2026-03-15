@@ -371,6 +371,7 @@ export default function App() {
               projectDir={projectDir}
               transform={canvasTransform}
               onTransformChange={setCanvasTransform}
+              onCanvasResize={(w) => { canvasWidthRef.current = w; }}
             />
           ) : viewMode === 'board' ? (
             <BoardView

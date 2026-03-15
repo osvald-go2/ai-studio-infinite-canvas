@@ -12,6 +12,7 @@ export function CanvasView({
   projectDir,
   transform,
   onTransformChange,
+  onCanvasResize,
 }: {
   sessions: Session[],
   setSessions: any,
@@ -20,6 +21,7 @@ export function CanvasView({
   projectDir?: string | null,
   transform: { x: number; y: number; scale: number },
   onTransformChange: React.Dispatch<React.SetStateAction<{ x: number; y: number; scale: number }>>,
+  onCanvasResize?: (width: number) => void,
 }) {
   const setTransform = onTransformChange;
   const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
@@ -32,6 +34,17 @@ export function CanvasView({
   const [selectionBox, setSelectionBox] = useState<{ startX: number, startY: number, currentX: number, currentY: number } | null>(null);
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [showMinimap, setShowMinimap] = useState(true);
+
+  useEffect(() => {
+    if (!containerRef.current || !onCanvasResize) return;
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        onCanvasResize(entry.contentRect.width);
+      }
+    });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, [onCanvasResize]);
 
   // Refs for group drag (avoid stale closures)
   const sessionsRef = useRef(sessions);
