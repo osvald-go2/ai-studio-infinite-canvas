@@ -17,6 +17,7 @@ function createWindow(): void {
       sandbox: false,
     },
     titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 16, y: 18 },
     backgroundColor: '#1A1A2E',
   });
 
