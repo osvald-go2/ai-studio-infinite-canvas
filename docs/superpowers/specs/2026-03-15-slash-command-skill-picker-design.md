@@ -17,21 +17,37 @@ Date: 2026-03-15
 
 ### 目录映射
 
-根据 session 的 model 关键词决定扫描路径：
+使用显式映射表，根据 session 的 model ID 确定平台：
 
-| Model 关键词 | 项目级目录 | 用户级目录 |
+```typescript
+const MODEL_TO_PLATFORM: Record<string, string> = {
+  'claude-code': 'claude',
+  'codex': 'codex',
+  'gemini-cli': 'gemini',
+}
+```
+
+各平台对应的扫描路径：
+
+| Platform | 项目级目录 | 用户级目录 |
 |---|---|---|
-| claude | `.claude/skills/` | `~/.claude/skills/` |
-| codex | `.codex/skills/` | `~/.codex/skills/` |
-| gemini | `.gemini/skills/` | `~/.gemini/skills/` |
+| claude | `{projectDir}/.claude/skills/` | `~/.claude/skills/` |
+| codex | `{projectDir}/.codex/skills/` | `~/.codex/skills/` |
+| gemini | `{projectDir}/.gemini/skills/` | `~/.gemini/skills/` |
 
-项目级和用户级目录都扫描，结果合并，项目级优先显示。
+项目级和用户级目录都扫描，结果合并，项目级优先显示。当 model ID 不在映射表中时，不扫描，不显示 picker。
 
 ### SKILL.md 解析
 
 只提取 YAML frontmatter 中的 `name` 和 `description` 字段，不加载 markdown body。支持递归扫描子目录中的 SKILL.md 文件。
 
 用轻量正则提取 frontmatter，不引入额外 npm 包。
+
+**容错处理：**
+- 目录不存在时静默跳过（返回空数组），不抛出错误
+- SKILL.md 无有效 frontmatter 或缺少 `name` 字段时跳过该文件
+- `description` 缺失时默认为空字符串
+- 文件系统错误捕获并 console.warn，不影响其他文件的扫描
 
 ### 数据类型
 
@@ -44,14 +60,18 @@ interface SkillInfo {
 }
 ```
 
+### 重名去重
+
+当项目级和用户级存在相同 `name` 的 skill 时，只保留项目级的。
+
 ### 运行环境
 
-- **Electron**：通过 preload 暴露 `window.electronAPI.scanSkills(platform: string): Promise<SkillInfo[]>`，主进程用 Node.js fs 递归扫描目录、解析 YAML frontmatter
+- **Electron**：通过 `window.aiBackend` 暴露 `scanSkills(platform: string, projectDir: string): Promise<SkillInfo[]>`，复用现有 IPC bridge 模式，主进程用 Node.js fs 递归扫描目录、解析 YAML frontmatter
 - **Browser**：`scanSkills()` 返回内置 mock skills 数据用于演示
 
 ### 扫描时机
 
-用户输入 `/` 时触发扫描。
+用户输入 `/` 时触发扫描。扫描结果在 `/` 输入期间缓存（picker 关闭后清除）。如果扫描 Promise 返回时触发条件已不满足（如用户已删除 `/`），丢弃结果。
 
 ## Frontend Interaction
 
@@ -100,13 +120,15 @@ interface SkillInfo {
 |---|---|
 | `↑` / `↓` | 在列表中移动高亮项 |
 | `Enter` | 选中当前高亮项，替换输入框为 `/skill-name `（尾部空格） |
-| `Esc` | 关闭列表，保留输入框现有文本 |
+| `Esc` | 关闭列表，保留输入框现有文本。SkillPicker 消费此事件（stopPropagation），防止触发 SessionWindow 的全局 ESC 处理（停止 streaming） |
 | 继续输入 | 实时过滤列表 |
 | 删除 `/` | 关闭列表 |
 
 ### 选中态样式
 
-选中 skill 后，输入框内 `/skill-name` 部分用轻量样式标识（略带背景色的 inline 效果）。用户可在后面继续输入参数。删改 `/skill-name` 到不匹配任何 skill 时，选中态消失。
+选中 skill 后，在输入框上方用 overlay div 叠加在 textarea 之上，对 `/skill-name` 部分渲染轻量背景色标识。textarea 本身保持为普通 `<textarea>`，不改为 contentEditable。用户可在后面继续输入参数。删改 `/skill-name` 到不匹配任何 skill 时，overlay 消失。
+
+**实现方式：** textarea 设置 `color: transparent`（或 `caret-color` 保留光标），overlay div 在相同位置用相同字体渲染文本，其中 `/skill-name` 部分带背景色，其余部分正常颜色。这是 syntax-highlighted textarea 的常见 pattern。
 
 ### 发送行为
 
@@ -119,15 +141,15 @@ interface SkillInfo {
 | File | Responsibility |
 |---|---|
 | `src/components/SkillPicker.tsx` | 浮动列表组件：渲染、键盘导航、匹配高亮 |
-| `src/services/skillScanner.ts` | skill 扫描逻辑：Electron 调 preload API，浏览器返回 mock |
+| `src/services/skillScanner.ts` | skill 扫描逻辑：Electron 调 aiBackend API，浏览器返回 mock |
 
 ### Modified Files
 
 | File | Changes |
 |---|---|
-| `electron/main.ts` | 添加 IPC handler `scan-skills`：接收 platform，扫描目录，解析 SKILL.md frontmatter，返回 `SkillInfo[]` |
-| `electron/preload.ts` | 暴露 `electronAPI.scanSkills(platform: string)` |
-| `src/components/SessionWindow.tsx` | 集成 SkillPicker：检测触发条件、管理 picker 显隐、处理选中回调、选中态样式 |
+| `electron/main.ts` | 添加 IPC handler `scan-skills`：接收 platform 和 projectDir，扫描目录，解析 SKILL.md frontmatter，返回 `SkillInfo[]` |
+| `electron/preload.ts` | 在 `aiBackend` 上暴露 `scanSkills(platform: string, projectDir: string)` |
+| `src/components/SessionWindow.tsx` | 集成 SkillPicker：检测触发条件、管理 picker 显隐、处理选中回调、选中态 overlay 渲染 |
 | `src/types.ts` | 添加 `SkillInfo` 类型 |
 
 ### No Changes
