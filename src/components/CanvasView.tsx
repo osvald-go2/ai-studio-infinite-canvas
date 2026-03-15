@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Session } from '../types';
 import { SessionWindow } from './SessionWindow';
-import { ZoomIn, ZoomOut, Maximize, Hand, MousePointer2, Send, Map } from 'lucide-react';
-import { SESSION_WIDTH, SESSION_DEFAULT_HEIGHT, SESSION_MIN_HEIGHT } from '@/constants';
+import { ZoomIn, ZoomOut, Maximize, Hand, MousePointer2, Send, Map, LayoutGrid } from 'lucide-react';
+import { SESSION_WIDTH, SESSION_DEFAULT_HEIGHT, SESSION_MIN_HEIGHT, SESSION_GAP, START_X, START_Y } from '@/constants';
 
 export function CanvasView({
   sessions,
@@ -12,6 +12,8 @@ export function CanvasView({
   transform,
   onTransformChange,
   onCanvasResize,
+  onToggleGitPanel,
+  onCopySession,
 }: {
   sessions: Session[],
   setSessions: any,
@@ -20,6 +22,8 @@ export function CanvasView({
   transform: { x: number; y: number; scale: number },
   onTransformChange: React.Dispatch<React.SetStateAction<{ x: number; y: number; scale: number }>>,
   onCanvasResize?: (width: number) => void,
+  onToggleGitPanel?: () => void,
+  onCopySession?: (title: string) => void,
 }) {
   const setTransform = onTransformChange;
   const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
@@ -32,6 +36,27 @@ export function CanvasView({
   const [selectionBox, setSelectionBox] = useState<{ startX: number, startY: number, currentX: number, currentY: number } | null>(null);
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [showMinimap, setShowMinimap] = useState(true);
+  const [isArranging, setIsArranging] = useState(false);
+  const arrangingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [contextMenu]);
+
+  // Cleanup arranging timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (arrangingTimeoutRef.current) {
+        clearTimeout(arrangingTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current || !onCanvasResize) return;
@@ -225,6 +250,52 @@ export function CanvasView({
     setSelectedSessionIds([]);
   };
 
+  const handleArrangeSessions = useCallback(() => {
+    if (sessions.length === 0) return;
+
+    const container = containerRef.current;
+    if (!container) return;
+
+    const viewportWidth = container.getBoundingClientRect().width;
+    const columns = Math.max(1, Math.floor(viewportWidth / (SESSION_WIDTH + SESSION_GAP)));
+    const columnHeights = new Array(columns).fill(START_Y);
+
+    const sorted = [...sessions].sort((a, b) => a.id.localeCompare(b.id));
+    const updates: Record<string, { x: number; y: number }> = {};
+
+    for (const session of sorted) {
+      const minCol = columnHeights.indexOf(Math.min(...columnHeights));
+      updates[session.id] = {
+        x: START_X + minCol * (SESSION_WIDTH + SESSION_GAP),
+        y: columnHeights[minCol],
+      };
+      columnHeights[minCol] += (session.height ?? SESSION_DEFAULT_HEIGHT) + SESSION_GAP;
+    }
+
+    if (arrangingTimeoutRef.current) {
+      clearTimeout(arrangingTimeoutRef.current);
+    }
+
+    setIsArranging(true);
+    setSessions((prev: Session[]) =>
+      prev.map(s => updates[s.id] ? { ...s, position: updates[s.id] } : s)
+    );
+    setTransform(prev => ({ ...prev, x: 0, y: 0 }));
+
+    arrangingTimeoutRef.current = setTimeout(() => {
+      setIsArranging(false);
+      arrangingTimeoutRef.current = null;
+    }, 400);
+  }, [sessions, setSessions, setTransform]);
+
+  const handleArrangeCancel = useCallback(() => {
+    if (arrangingTimeoutRef.current) {
+      clearTimeout(arrangingTimeoutRef.current);
+      arrangingTimeoutRef.current = null;
+    }
+    setIsArranging(false);
+  }, []);
+
   return (
     <div 
       ref={containerRef}
@@ -236,9 +307,16 @@ export function CanvasView({
     >
       <div 
         className="absolute top-0 left-0 w-full h-full transition-transform duration-300 ease-out"
-        style={{ 
+        style={{
           transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
           transformOrigin: '0 0',
+        }}
+        onContextMenu={(e) => {
+          const target = e.target as HTMLElement;
+          if (!target.closest('.session-container')) {
+            e.preventDefault();
+            setContextMenu({ x: e.clientX, y: e.clientY });
+          }
         }}
       >
         {sessions.map(session => (
@@ -266,6 +344,10 @@ export function CanvasView({
             }}
             onDelete={() => setSessions((prev: Session[]) => prev.filter(s => s.id !== session.id))}
             projectDir={projectDir}
+            onToggleGitPanel={onToggleGitPanel}
+            onCopySession={onCopySession}
+            isArranging={isArranging}
+            onArrangeCancel={handleArrangeCancel}
           />
         ))}
 
@@ -373,6 +455,14 @@ export function CanvasView({
         </button>
         <div className="w-px h-4 bg-white/10 mx-1" />
         <button
+          onClick={handleArrangeSessions}
+          className="p-1.5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors"
+          title="整理画布"
+        >
+          <LayoutGrid size={18} />
+        </button>
+        <div className="w-px h-4 bg-white/10 mx-1" />
+        <button
           onClick={() => setShowMinimap(v => !v)}
           className={`p-1.5 rounded-lg transition-colors ${showMinimap ? 'bg-blue-500/30 text-blue-300' : 'text-gray-300 hover:bg-white/10'}`}
           title="Toggle Minimap"
@@ -380,6 +470,35 @@ export function CanvasView({
           <Map size={18} />
         </button>
       </div>
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-[59]"
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }}
+          />
+          <div
+            className="fixed z-[60] bg-black/40 backdrop-blur-md rounded-xl border border-white/10 py-1.5 shadow-2xl"
+            style={{
+              left: Math.min(contextMenu.x, window.innerWidth - 200),
+              top: Math.min(contextMenu.y, window.innerHeight - 60),
+            }}
+          >
+            <button
+              onClick={() => {
+                handleArrangeSessions();
+                setContextMenu(null);
+              }}
+              className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-200 hover:bg-white/10 w-full transition-colors"
+            >
+              <LayoutGrid size={16} />
+              整理画布
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -625,6 +744,10 @@ function DraggableSession({
   updateSession,
   onDelete,
   projectDir,
+  onToggleGitPanel,
+  onCopySession,
+  isArranging,
+  onArrangeCancel,
 }: {
   session: Session,
   transformScale: number,
@@ -638,6 +761,10 @@ function DraggableSession({
   updateSession: (s: Session) => void,
   onDelete: () => void,
   projectDir?: string | null,
+  onToggleGitPanel?: () => void,
+  onCopySession?: (title: string) => void,
+  isArranging?: boolean,
+  onArrangeCancel?: () => void,
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
@@ -646,11 +773,47 @@ function DraggableSession({
   const dragStartPointRef = useRef({ x: 0, y: 0 });
   const isGroupDragActiveRef = useRef(false);
 
+  // Capture-phase selection tracking
+  const selectionHandledRef = useRef(false);
+  const INTERACTIVE_SELECTOR = 'button, input, textarea, a, select, [contenteditable]';
+
   // Resize state
   const [isResizing, setIsResizing] = useState(false);
   const [resizeStartY, setResizeStartY] = useState(0);
   const [resizeStartHeight, setResizeStartHeight] = useState(0);
   const [animateHeight, setAnimateHeight] = useState(false);
+
+  // Capture phase: runs before child stopPropagation can block bubble phase
+  const handleMouseDownCapture = (e: React.MouseEvent) => {
+    selectionHandledRef.current = false;
+    const target = e.target as HTMLElement;
+    const isInteractive = !!target.closest(INTERACTIVE_SELECTOR);
+
+    if (toolMode === 'select') {
+      // Handle selection in capture phase so content area clicks also trigger selection
+      if (!isInteractive && !isGroupDrag) {
+        onSelect?.(e.shiftKey || e.metaKey || e.ctrlKey);
+        selectionHandledRef.current = true;
+      }
+      // Don't stopPropagation — let children work normally (scroll, text selection, etc.)
+    } else if (toolMode === 'hand') {
+      // Hand mode + group drag: initiate group drag from anywhere
+      if (isGroupDrag && !isInteractive) {
+        if (isArranging) {
+          onArrangeCancel?.();
+        }
+        e.stopPropagation();
+        e.preventDefault();
+        setIsDragging(true);
+        onGroupDragStart();
+        dragStartPointRef.current = {
+          x: e.clientX / transformScale,
+          y: e.clientY / transformScale,
+        };
+        isGroupDragActiveRef.current = true;
+      }
+    }
+  };
 
   const handleMouseDown = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -659,21 +822,26 @@ function DraggableSession({
     const canDrag = isHeader || isHandModeDrag;
 
     if (canDrag) {
+      if (isArranging) {
+        onArrangeCancel?.();
+      }
       e.stopPropagation();
       // Don't reset selection when starting a group drag
       if (!isGroupDrag) {
-        onSelect?.(e.shiftKey || e.metaKey || e.ctrlKey);
+        if (!selectionHandledRef.current) {
+          onSelect?.(e.shiftKey || e.metaKey || e.ctrlKey);
+        }
       }
       setIsDragging(true);
 
-      if (isGroupDrag) {
+      if (isGroupDrag && !isGroupDragActiveRef.current) {
         onGroupDragStart();
         dragStartPointRef.current = {
           x: e.clientX / transformScale,
           y: e.clientY / transformScale
         };
         isGroupDragActiveRef.current = true;
-      } else {
+      } else if (!isGroupDrag) {
         setDragOffset({
           x: e.clientX / transformScale - session.position.x,
           y: e.clientY / transformScale - session.position.y
@@ -681,7 +849,9 @@ function DraggableSession({
         isGroupDragActiveRef.current = false;
       }
     } else {
-      onSelect?.(e.shiftKey || e.metaKey || e.ctrlKey);
+      if (!selectionHandledRef.current) {
+        onSelect?.(e.shiftKey || e.metaKey || e.ctrlKey);
+      }
     }
   };
 
@@ -776,7 +946,13 @@ function DraggableSession({
   return (
     <div
       className={`session-container absolute transition-shadow duration-300 ${isFocused ? 'ring-4 ring-blue-500/50 rounded-2xl shadow-2xl shadow-blue-500/20' : ''} ${isSelected ? 'ring-2 ring-blue-400 rounded-2xl shadow-lg shadow-blue-500/20' : ''} ${toolMode === 'hand' ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
-      style={{ left: session.position.x, top: session.position.y }}
+      style={{
+        left: session.position.x,
+        top: session.position.y,
+        transition: isArranging && !isDragging ? 'left 0.4s cubic-bezier(0.4, 0, 0.2, 1), top 0.4s cubic-bezier(0.4, 0, 0.2, 1)' : undefined,
+      }}
+      onContextMenu={(e) => e.stopPropagation()}
+      onMouseDownCapture={handleMouseDownCapture}
       onMouseDown={handleMouseDown}
     >
       <SessionWindow
@@ -787,6 +963,8 @@ function DraggableSession({
         animateHeight={animateHeight}
         onHeaderDoubleClick={handleHeaderDoubleClick}
         projectDir={projectDir}
+        onToggleGitPanel={onToggleGitPanel}
+        onCopySession={onCopySession}
       />
       {/* Resize handle */}
       <div
