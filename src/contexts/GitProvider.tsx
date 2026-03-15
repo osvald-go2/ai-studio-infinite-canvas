@@ -1,0 +1,345 @@
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import type {
+  GitInfo,
+  FileChange,
+  BranchInfo,
+  WorktreeInfo,
+  CommitInfo,
+  TreeNode,
+  DiffOutput,
+} from '../types/git';
+import { gitService } from '../services/git';
+import * as mock from '../services/mockGitData';
+
+function isElectron(): boolean {
+  return typeof window !== 'undefined' && (window as any).aiBackend !== undefined;
+}
+
+function buildFileTree(paths: string[]): TreeNode[] {
+  const root: TreeNode[] = [];
+  for (const filePath of paths) {
+    const parts = filePath.split('/');
+    let current = root;
+    let currentPath = '';
+    for (let i = 0; i < parts.length; i++) {
+      currentPath = currentPath ? `${currentPath}/${parts[i]}` : parts[i];
+      const isFile = i === parts.length - 1;
+      let existing = current.find(n => n.name === parts[i]);
+      if (!existing) {
+        existing = {
+          name: parts[i],
+          path: currentPath,
+          type: isFile ? 'file' : 'directory',
+          ...(isFile ? {} : { children: [] }),
+        };
+        current.push(existing);
+      }
+      if (!isFile) {
+        current = existing.children!;
+      }
+    }
+  }
+  const sortTree = (nodes: TreeNode[]) => {
+    nodes.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    nodes.forEach(n => { if (n.children) sortTree(n.children); });
+  };
+  sortTree(root);
+  return root;
+}
+
+interface GitState {
+  isRepo: boolean;
+  info: GitInfo;
+  changes: FileChange[];
+  branches: BranchInfo[];
+  worktrees: WorktreeInfo[];
+  log: CommitInfo[];
+  fileTree: TreeNode[];
+  loading: boolean;
+}
+
+interface GitActions {
+  stageFile: (file: string) => Promise<void>;
+  unstageFile: (file: string) => Promise<void>;
+  discardFile: (file: string) => Promise<void>;
+  commit: (message: string) => Promise<void>;
+  createWorktree: (branch: string, base: string) => Promise<string>;
+  mergeWorktree: (wtPath: string, target?: string) => Promise<string>;
+  removeWorktree: (wtPath: string, branch: string) => Promise<void>;
+  refresh: () => Promise<void>;
+  refreshChanges: () => Promise<void>;
+  refreshBranches: () => Promise<void>;
+  refreshLog: () => Promise<void>;
+  refreshInfo: () => Promise<void>;
+  getDiff: (file: string) => Promise<DiffOutput>;
+  getFileContent: (filePath: string, gitRef?: string) => Promise<string>;
+  generateCommitMsg: () => Promise<string>;
+  onCommitMsgStream: (sessionId: string, onDelta: (text: string) => void) => () => void;
+}
+
+interface GitContextValue extends GitState, GitActions {}
+
+const GitContext = createContext<GitContextValue | null>(null);
+
+const defaultInfo: GitInfo = {
+  branch: '',
+  commit_hash: '',
+  commit_message: '',
+  ahead: 0,
+  behind: 0,
+  has_upstream: false,
+};
+
+interface GitProviderProps {
+  projectDir: string | null;
+  children: React.ReactNode;
+}
+
+export function GitProvider({ projectDir, children }: GitProviderProps) {
+  const [state, setState] = useState<GitState>({
+    isRepo: false,
+    info: defaultInfo,
+    changes: [],
+    branches: [],
+    worktrees: [],
+    log: [],
+    fileTree: [],
+    loading: true,
+  });
+
+  const dirRef = useRef(projectDir);
+  dirRef.current = projectDir;
+
+  const dir = projectDir ?? '';
+
+  const refreshInfo = useCallback(async () => {
+    if (!dir || !isElectron()) return;
+    const info = await gitService.info(dir);
+    setState(prev => ({ ...prev, info }));
+  }, [dir]);
+
+  const refreshChanges = useCallback(async () => {
+    if (!dir || !isElectron()) return;
+    const [changes, filePaths] = await Promise.all([
+      gitService.changes(dir),
+      gitService.fileTree(dir).catch(() => [] as string[]),
+    ]);
+    setState(prev => ({
+      ...prev,
+      changes,
+      fileTree: buildFileTree(filePaths),
+    }));
+  }, [dir]);
+
+  const refreshBranches = useCallback(async () => {
+    if (!dir || !isElectron()) return;
+    const [branches, worktrees] = await Promise.all([
+      gitService.branches(dir),
+      gitService.worktrees(dir),
+    ]);
+    setState(prev => ({ ...prev, branches, worktrees }));
+  }, [dir]);
+
+  const refreshLog = useCallback(async () => {
+    if (!dir || !isElectron()) return;
+    const log = await gitService.log(dir, 50);
+    setState(prev => ({ ...prev, log }));
+  }, [dir]);
+
+  const refresh = useCallback(async () => {
+    if (!dir) return;
+    if (!isElectron()) return;
+    setState(prev => ({ ...prev, loading: true }));
+    try {
+      const isRepo = await gitService.checkRepo(dir);
+      if (!isRepo) {
+        setState(prev => ({ ...prev, isRepo: false, loading: false }));
+        return;
+      }
+      const [info, changes, branches, worktrees, log, filePaths] = await Promise.all([
+        gitService.info(dir),
+        gitService.changes(dir),
+        gitService.branches(dir),
+        gitService.worktrees(dir),
+        gitService.log(dir, 50),
+        gitService.fileTree(dir).catch(() => [] as string[]),
+      ]);
+      setState({
+        isRepo: true,
+        info,
+        changes,
+        branches,
+        worktrees,
+        log,
+        fileTree: buildFileTree(filePaths),
+        loading: false,
+      });
+    } catch {
+      setState(prev => ({ ...prev, loading: false }));
+    }
+  }, [dir]);
+
+  useEffect(() => {
+    if (!dir) {
+      setState(prev => ({ ...prev, loading: false }));
+      return;
+    }
+    if (!isElectron()) {
+      setState({
+        isRepo: true,
+        info: mock.mockGitInfo,
+        changes: mock.mockChanges,
+        branches: mock.mockBranches,
+        worktrees: mock.mockWorktrees,
+        log: mock.mockLog,
+        fileTree: mock.mockFileTree,
+        loading: false,
+      });
+      return;
+    }
+    refresh();
+  }, [dir, refresh]);
+
+  useEffect(() => {
+    if (!dir || !isElectron()) return;
+
+    gitService.watch(dir).catch(() => {});
+
+    const handler = (data: { dir: string; kind: string }) => {
+      if (data.dir !== dirRef.current) return;
+      switch (data.kind) {
+        case 'files':
+          refreshChanges();
+          break;
+        case 'refs':
+          refreshBranches();
+          break;
+        case 'head':
+          refreshInfo();
+          refreshLog();
+          refreshChanges();
+          break;
+      }
+    };
+
+    (window as any).aiBackend?.on('git.changed', handler);
+
+    return () => {
+      (window as any).aiBackend?.off('git.changed', handler);
+      gitService.unwatch(dir).catch(() => {});
+    };
+  }, [dir, refreshChanges, refreshBranches, refreshInfo, refreshLog]);
+
+  const stageFile = useCallback(async (file: string) => {
+    if (!dir) return;
+    if (!isElectron()) {
+      setState(prev => ({ ...prev, changes: prev.changes.filter(c => c.path !== file) }));
+      return;
+    }
+    await gitService.stageFile(dir, file);
+    await refreshChanges();
+  }, [dir, refreshChanges]);
+
+  const unstageFile = useCallback(async (file: string) => {
+    if (!dir) return;
+    if (!isElectron()) return;
+    await gitService.unstageFile(dir, file);
+    await refreshChanges();
+  }, [dir, refreshChanges]);
+
+  const discardFile = useCallback(async (file: string) => {
+    if (!dir) return;
+    if (!isElectron()) {
+      setState(prev => ({ ...prev, changes: prev.changes.filter(c => c.path !== file) }));
+      return;
+    }
+    await gitService.discardFile(dir, file);
+    await refreshChanges();
+  }, [dir, refreshChanges]);
+
+  const commitAction = useCallback(async (message: string) => {
+    if (!dir) return;
+    if (!isElectron()) {
+      setState(prev => ({
+        ...prev,
+        changes: [],
+        log: [{ hash: 'mock' + Date.now(), message, author: 'You', date: 'just now', branches: [prev.info.branch], files: [] }, ...prev.log],
+      }));
+      return;
+    }
+    await gitService.commit(dir, message);
+    await refresh();
+  }, [dir, refresh]);
+
+  const createWorktree = useCallback(async (branch: string, base: string) => {
+    if (!dir || !isElectron()) return '';
+    const path = await gitService.createWorktree(dir, branch, base);
+    await refreshBranches();
+    return path;
+  }, [dir, refreshBranches]);
+
+  const mergeWorktree = useCallback(async (wtPath: string, target?: string) => {
+    if (!dir || !isElectron()) return '';
+    const msg = await gitService.mergeWorktree(dir, wtPath, target);
+    await refresh();
+    return msg;
+  }, [dir, refresh]);
+
+  const removeWorktree = useCallback(async (wtPath: string, branch: string) => {
+    if (!dir || !isElectron()) return;
+    await gitService.removeWorktree(dir, wtPath, branch);
+    await refreshBranches();
+  }, [dir, refreshBranches]);
+
+  const getDiff = useCallback(async (file: string): Promise<DiffOutput> => {
+    if (!dir) return { file_path: file, hunks: [] };
+    if (!isElectron()) return mock.mockDiffOutput;
+    return gitService.diff(dir, file);
+  }, [dir]);
+
+  const getFileContent = useCallback(async (filePath: string, gitRef?: string) => {
+    if (!dir) return '';
+    if (!isElectron()) return `// Mock content for ${filePath}`;
+    return gitService.fileContent(dir, filePath, gitRef);
+  }, [dir]);
+
+  const generateCommitMsg = useCallback(async () => {
+    if (!dir) return '';
+    return gitService.generateCommitMsg(dir);
+  }, [dir]);
+
+  const onCommitMsgStream = useCallback((sessionId: string, onDelta: (text: string) => void) => {
+    return gitService.onCommitMsgStream(sessionId, onDelta);
+  }, []);
+
+  const value: GitContextValue = {
+    ...state,
+    stageFile,
+    unstageFile,
+    discardFile,
+    commit: commitAction,
+    createWorktree,
+    mergeWorktree,
+    removeWorktree,
+    refresh,
+    refreshChanges,
+    refreshBranches,
+    refreshLog,
+    refreshInfo,
+    getDiff,
+    getFileContent,
+    generateCommitMsg,
+    onCommitMsgStream,
+  };
+
+  return <GitContext.Provider value={value}>{children}</GitContext.Provider>;
+}
+
+export function useGit(): GitContextValue {
+  const ctx = useContext(GitContext);
+  if (!ctx) throw new Error('useGit must be used within GitProvider');
+  return ctx;
+}
