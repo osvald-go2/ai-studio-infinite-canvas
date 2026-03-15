@@ -92,7 +92,7 @@ export default function App() {
   const [focusedSessionId, setFocusedSessionId] = useState<string | null>(null);
 
   // Git Review State
-  const [reviewSessionId, setReviewSessionId] = useState<string | null>(null);
+  const [reviewFilePath, setReviewFilePath] = useState<string | null>(null);
 
   // Git Project State
   const [projectDir, setProjectDir] = useState<string | null>(null);
@@ -132,7 +132,6 @@ export default function App() {
         gitBranch: s.git_branch ?? undefined,
         worktree: s.worktree ?? undefined,
         messages: JSON.parse(s.messages),
-        diff: null,
       };
     });
     setCurrentProject(project);
@@ -316,26 +315,6 @@ export default function App() {
     });
   };
 
-  const handleCommit = (message: string) => {
-    if (reviewSessionId) {
-      setSessions(prev => prev.map(s =>
-        s.id === reviewSessionId
-          ? { ...s, diff: null, hasChanges: false, changeCount: 0, status: 'done' as const }
-          : s
-      ));
-    }
-  };
-
-  const handleDiscard = () => {
-    if (reviewSessionId) {
-      setSessions(prev => prev.map(s =>
-        s.id === reviewSessionId
-          ? { ...s, diff: null, hasChanges: false, changeCount: 0, status: 'inprocess' as const }
-          : s
-      ));
-    }
-  };
-
   const handleLocateSession = (id: string) => {
     setFocusedSessionId(id);
   };
@@ -402,7 +381,6 @@ export default function App() {
               <CanvasView
                 sessions={sessions}
                 setSessions={setSessions}
-                onOpenReview={(sessionId) => setReviewSessionId(sessionId)}
                 focusedSessionId={focusedSessionId}
                 projectDir={projectDir}
                 transform={canvasTransform}
@@ -413,7 +391,6 @@ export default function App() {
               <BoardView
                 sessions={sessions}
                 setSessions={setSessions}
-                onOpenReview={(sessionId) => setReviewSessionId(sessionId)}
                 focusedSessionId={focusedSessionId}
                 projectDir={projectDir}
               />
@@ -421,7 +398,6 @@ export default function App() {
               <TabView
                 sessions={sessions}
                 setSessions={setSessions}
-                onOpenReview={(sessionId) => setReviewSessionId(sessionId)}
                 focusedSessionId={focusedSessionId}
                 projectDir={projectDir}
               />
@@ -433,6 +409,7 @@ export default function App() {
             <GitPanel
               isOpen={showGitPanel}
               onClose={() => setShowGitPanel(false)}
+              onOpenDiff={(filePath) => setReviewFilePath(filePath)}
             />
           )}
         </div>
@@ -446,10 +423,9 @@ export default function App() {
         />
 
         <GitReviewPanel
-          isOpen={!!reviewSessionId}
-          onClose={() => setReviewSessionId(null)}
-          onCommit={handleCommit}
-          onDiscard={handleDiscard}
+          isOpen={!!reviewFilePath}
+          filePath={reviewFilePath}
+          onClose={() => setReviewFilePath(null)}
         />
       </GitProvider>
     </div>

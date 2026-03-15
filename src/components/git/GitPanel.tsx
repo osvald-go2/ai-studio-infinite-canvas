@@ -10,6 +10,7 @@ type PanelTab = 'changes' | 'git' | 'files';
 export interface GitPanelProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenDiff?: (filePath: string) => void;
 }
 
 const MIN_WIDTH = 280;
@@ -19,6 +20,7 @@ const DEFAULT_WIDTH = 360;
 export function GitPanel({
   isOpen,
   onClose,
+  onOpenDiff,
 }: GitPanelProps) {
   const [activeTab, setActiveTab] = useState<PanelTab>('changes');
   const [panelWidth, setPanelWidth] = useState(DEFAULT_WIDTH);
@@ -126,7 +128,7 @@ export function GitPanel({
 
       {/* Content */}
       <div className="flex-1 overflow-hidden">
-        {activeTab === 'changes' && <ChangesTab />}
+        {activeTab === 'changes' && <ChangesTab onOpenDiff={onOpenDiff} />}
         {activeTab === 'git' && <GitTab />}
         {activeTab === 'files' && <FilesTab />}
       </div>
