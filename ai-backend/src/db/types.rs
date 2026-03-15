@@ -28,6 +28,7 @@ pub struct DbSession {
     pub messages: String,
     pub created_at: String,
     pub updated_at: String,
+    pub claude_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

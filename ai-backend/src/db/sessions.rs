@@ -21,14 +21,15 @@ fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<DbSession> {
         messages: row.get(10)?,
         created_at: row.get(11)?,
         updated_at: row.get(12)?,
+        claude_session_id: row.get(13)?,
     })
 }
 
 pub fn create(db: &Database, session: &DbSession) -> Result<(), String> {
     let conn = db.conn();
     conn.execute(
-        "INSERT INTO sessions (id, project_id, title, model, status, position_x, position_y, height, git_branch, worktree, messages, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        "INSERT INTO sessions (id, project_id, title, model, status, position_x, position_y, height, git_branch, worktree, messages, created_at, updated_at, claude_session_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             session.id,
             session.project_id,
@@ -43,6 +44,7 @@ pub fn create(db: &Database, session: &DbSession) -> Result<(), String> {
             session.messages,
             session.created_at,
             session.updated_at,
+            session.claude_session_id,
         ],
     )
     .map_err(|e| format!("failed to create session: {e}"))?;
@@ -52,7 +54,7 @@ pub fn create(db: &Database, session: &DbSession) -> Result<(), String> {
 pub fn get_by_id(db: &Database, id: &str) -> Result<Option<DbSession>, String> {
     let conn = db.conn();
     conn.query_row(
-        "SELECT id, project_id, title, model, status, position_x, position_y, height, git_branch, worktree, messages, created_at, updated_at
+        "SELECT id, project_id, title, model, status, position_x, position_y, height, git_branch, worktree, messages, created_at, updated_at, claude_session_id
          FROM sessions WHERE id = ?1",
         params![id],
         row_to_session,
@@ -65,7 +67,7 @@ pub fn list_by_project(db: &Database, project_id: i64) -> Result<Vec<DbSession>,
     let conn = db.conn();
     let mut stmt = conn
         .prepare(
-            "SELECT id, project_id, title, model, status, position_x, position_y, height, git_branch, worktree, messages, created_at, updated_at
+            "SELECT id, project_id, title, model, status, position_x, position_y, height, git_branch, worktree, messages, created_at, updated_at, claude_session_id
              FROM sessions WHERE project_id = ?1 ORDER BY created_at ASC",
         )
         .map_err(|e| format!("failed to prepare list query: {e}"))?;
@@ -82,8 +84,8 @@ pub fn list_by_project(db: &Database, project_id: i64) -> Result<Vec<DbSession>,
 pub fn update(db: &Database, session: &DbSession) -> Result<(), String> {
     let conn = db.conn();
     conn.execute(
-        "UPDATE sessions SET project_id = ?1, title = ?2, model = ?3, status = ?4, position_x = ?5, position_y = ?6, height = ?7, git_branch = ?8, worktree = ?9, messages = ?10, updated_at = ?11
-         WHERE id = ?12",
+        "UPDATE sessions SET project_id = ?1, title = ?2, model = ?3, status = ?4, position_x = ?5, position_y = ?6, height = ?7, git_branch = ?8, worktree = ?9, messages = ?10, claude_session_id = ?11, updated_at = ?12
+         WHERE id = ?13",
         params![
             session.project_id,
             session.title,
@@ -95,6 +97,7 @@ pub fn update(db: &Database, session: &DbSession) -> Result<(), String> {
             session.git_branch,
             session.worktree,
             session.messages,
+            session.claude_session_id,
             now(),
             session.id,
         ],
@@ -165,6 +168,7 @@ mod tests {
             messages: "[]".to_string(),
             created_at: now(),
             updated_at: now(),
+            claude_session_id: None,
         }
     }
 

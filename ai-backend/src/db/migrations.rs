@@ -1,6 +1,6 @@
 use super::Database;
 
-const CURRENT_VERSION: i64 = 1;
+const CURRENT_VERSION: i64 = 2;
 
 pub fn run(db: &Database) -> Result<(), String> {
     let conn = db.conn();
@@ -12,6 +12,19 @@ pub fn run(db: &Database) -> Result<(), String> {
     if version < 1 {
         migrate_v1(&conn)?;
     }
+
+    if version < 2 {
+        migrate_v2(&conn)?;
+    }
+
+    Ok(())
+}
+
+fn migrate_v2(conn: &rusqlite::Connection) -> Result<(), String> {
+    conn.execute_batch("
+        ALTER TABLE sessions ADD COLUMN claude_session_id TEXT DEFAULT NULL;
+        PRAGMA user_version = 2;
+    ").map_err(|e| format!("migration v2 failed: {e}"))?;
 
     Ok(())
 }
@@ -90,7 +103,7 @@ mod tests {
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
     }
 
     #[test]
@@ -101,6 +114,6 @@ mod tests {
         let version: i64 = db.conn()
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
     }
 }
