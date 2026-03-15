@@ -2,6 +2,7 @@ use std::io::{self, Write};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
 
+mod db;
 mod protocol;
 mod router;
 mod session;
