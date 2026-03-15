@@ -1,20 +1,15 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { X, RefreshCw, GitBranch, FileDiff, FolderOpen } from 'lucide-react';
-import { Session } from '../../types';
 import { ChangesTab } from './ChangesTab';
 import { GitTab } from './GitTab';
 import { FilesTab } from './FilesTab';
-import { gitService } from '../../services/git';
+import { useGit } from '../../contexts/GitProvider';
 
 type PanelTab = 'changes' | 'git' | 'files';
 
 export interface GitPanelProps {
   isOpen: boolean;
   onClose: () => void;
-  projectDir: string;
-  sessions: Session[];
-  focusedSessionId: string | null;
-  onSessionUpdate: (id: string, updates: Partial<Session>) => void;
 }
 
 const MIN_WIDTH = 280;
@@ -24,33 +19,12 @@ const DEFAULT_WIDTH = 360;
 export function GitPanel({
   isOpen,
   onClose,
-  projectDir,
-  sessions,
-  focusedSessionId,
-  onSessionUpdate,
 }: GitPanelProps) {
   const [activeTab, setActiveTab] = useState<PanelTab>('changes');
   const [panelWidth, setPanelWidth] = useState(DEFAULT_WIDTH);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [changesCount, setChangesCount] = useState(0);
+  const { changes, refresh } = useGit();
 
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
-
-  // Determine workingDir from focused session or fall back to projectDir
-  const workingDir =
-    sessions.find((s) => s.id === focusedSessionId)?.worktree ?? projectDir;
-
-  // Fetch changes count for badge
-  useEffect(() => {
-    if (!isOpen) return;
-    let cancelled = false;
-    gitService.changes(workingDir).then((changes) => {
-      if (!cancelled) setChangesCount(changes.length);
-    }).catch(() => {
-      if (!cancelled) setChangesCount(0);
-    });
-    return () => { cancelled = true; };
-  }, [isOpen, workingDir, refreshKey]);
 
   // ── Drag-to-resize (left edge) ──
   const onDragStart = useCallback((e: React.MouseEvent) => {
@@ -79,16 +53,8 @@ export function GitPanel({
   }, [panelWidth]);
 
   const handleRefresh = useCallback(() => {
-    setRefreshKey((k) => k + 1);
-  }, []);
-
-  const handleMerge = useCallback((_wtPath: string, _branch: string) => {
-    setRefreshKey((k) => k + 1);
-  }, []);
-
-  const handleDiscard = useCallback((_wtPath: string, _branch: string) => {
-    setRefreshKey((k) => k + 1);
-  }, []);
+    refresh();
+  }, [refresh]);
 
   const tabs: { key: PanelTab; label: string; icon: React.ElementType }[] = [
     { key: 'changes', label: 'Changes', icon: FileDiff },
@@ -148,9 +114,9 @@ export function GitPanel({
             >
               <Icon size={13} className={isActive ? 'text-amber-400' : ''} />
               {tab.label}
-              {tab.key === 'changes' && changesCount > 0 && (
+              {tab.key === 'changes' && changes.length > 0 && (
                 <span className="text-[10px] font-semibold bg-amber-400 text-zinc-900 rounded-full px-1.5 py-0 leading-4 min-w-[16px] text-center">
-                  {changesCount}
+                  {changes.length}
                 </span>
               )}
             </button>
@@ -160,22 +126,8 @@ export function GitPanel({
 
       {/* Content */}
       <div className="flex-1 overflow-hidden">
-        {activeTab === 'changes' && (
-          <ChangesTab
-            workingDir={workingDir}
-            refreshKey={refreshKey}
-            onCommitSuccess={handleRefresh}
-          />
-        )}
-        {activeTab === 'git' && (
-          <GitTab
-            workingDir={workingDir}
-            projectDir={projectDir}
-            refreshKey={refreshKey}
-            onMerge={handleMerge}
-            onDiscard={handleDiscard}
-          />
-        )}
+        {activeTab === 'changes' && <ChangesTab />}
+        {activeTab === 'git' && <GitTab />}
         {activeTab === 'files' && <FilesTab />}
       </div>
     </div>

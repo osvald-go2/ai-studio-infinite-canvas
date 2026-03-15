@@ -433,10 +433,6 @@ export default function App() {
             <GitPanel
               isOpen={showGitPanel}
               onClose={() => setShowGitPanel(false)}
-              projectDir={projectDir}
-              sessions={sessions}
-              focusedSessionId={focusedSessionId}
-              onSessionUpdate={handleSessionUpdate}
             />
           )}
         </div>
