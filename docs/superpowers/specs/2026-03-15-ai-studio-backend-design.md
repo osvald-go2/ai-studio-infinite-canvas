@@ -95,7 +95,9 @@ ai-studio-infinite-canvas/
 ### Streaming Event (Rust → Main, no id)
 
 ```json
-{"event": "message.delta", "data": {"session_id": "abc123", "delta": {"type": "text", "content": "hello"}}}
+{"event": "block.start", "data": {"session_id": "abc123", "block_index": 0, "block": {"type": "text", "content": ""}}}
+{"event": "block.delta", "data": {"session_id": "abc123", "block_index": 0, "delta": {"content": "hello"}}}
+{"event": "block.stop", "data": {"session_id": "abc123", "block_index": 0}}
 {"event": "message.complete", "data": {"session_id": "abc123"}}
 ```
 
@@ -103,9 +105,9 @@ ai-studio-infinite-canvas/
 
 | Method | Params | Response | Description |
 |--------|--------|----------|-------------|
-| `session.create` | `{model, max_tokens?}` | `{session_id}` | Create new session. Frontend constructs the full `Session` object locally (default position, empty messages, etc.) using only the returned `session_id`. `max_tokens` defaults to `4096` if omitted. |
-| `session.send` | `{session_id, text}` | `{ok: true}` | Send user message. Response is returned **immediately** upon accepting the request, before Claude API streaming begins. Streaming content arrives via subsequent `message.*` events. Rust sidecar maintains the full conversation history internally (see Session State Ownership below). |
-| `session.list` | - | `{sessions: [...]}` | List all active sessions |
+| `session.create` | `{model, max_tokens?, history?}` | `{session_id}` | Create new session. Frontend constructs the full `Session` object locally (default position, empty messages, etc.) using only the returned `session_id`. `max_tokens` defaults to `4096` if omitted. `history` is an optional `Message[]` array to pre-populate conversation context (used for crash recovery). |
+| `session.send` | `{session_id, text}` | `{ok: true}` | Send user message. Response is returned **immediately** upon accepting the request, before Claude API streaming begins. Streaming content arrives via subsequent `block.*` events. Rust sidecar maintains the full conversation history internally (see Session State Ownership below). |
+| `session.list` | - | `{sessions: SessionSummary[]}` | List all active sessions. Each `SessionSummary`: `{id: string, model: string, message_count: number, created_at: string}`. Does not include full messages (frontend holds its own full Session state). |
 | `session.kill` | `{session_id}` | `{ok: true}` | Kill session |
 | `config.set_api_key` | `{api_key}` | `{ok: true}` | Set or update the Anthropic API key at runtime. Allows key changes without restarting the sidecar. |
 | `ping` | - | `{pong: true}` | Health check |
@@ -278,7 +280,7 @@ Complete flow for a user sending a message:
 6.  → Claude API POST (stream: true)
 7.  ← SSE chunks from Claude
 8.  ← normalizer converts to ContentBlock
-9.  ← stdout NDJSON: {event: "message.delta", data: {session_id, delta}}
+9.  ← stdout NDJSON: {event: "block.start/delta/stop", data: {session_id, block_index, ...}}
 10. ← sidecar.ts parses → IPC broadcast to renderer
 11. ← preload → renderer callback
 12. ← SessionWindow updates messages state → UI renders
@@ -309,7 +311,7 @@ When the Rust sidecar crashes:
 1. **Detection**: Main process (`sidecar.ts`) detects the child process exit via the `close` event
 2. **Auto-restart**: Main process spawns a new sidecar instance (with the stored API key re-injected)
 3. **Frontend notification**: Main process emits a `sidecar.restarted` event to the renderer
-4. **State reconciliation**: The frontend treats this as a soft reset — all sessions remain in the frontend's state (with their full message history), but their backend counterparts no longer exist. The frontend does NOT auto-re-create sessions on the backend. When the user next sends a message in a session, the frontend calls `session.create` to re-register it, then replays the existing message history via a single `session.send` that includes all prior messages in the `text` param (or a dedicated `session.restore` method if needed in a future version)
+4. **State reconciliation**: The frontend treats this as a soft reset — all sessions remain in the frontend's state (with their full message history), but their backend counterparts no longer exist. The frontend does NOT auto-re-create sessions on the backend. When the user next sends a message in a session, the frontend calls `session.create` with the optional `history` param (containing all prior messages from the frontend's state), which pre-populates the Rust sidecar's conversation context. Then the frontend calls `session.send` with the new user message as normal
 5. **User impact**: Minimal — the user sees a transient "reconnecting" indicator, then can continue conversations
 
 ## Out of Scope (v1)
