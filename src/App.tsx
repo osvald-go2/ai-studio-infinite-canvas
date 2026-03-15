@@ -155,6 +155,7 @@ export default function App() {
         height: s.height ?? undefined,
         gitBranch: s.git_branch ?? undefined,
         worktree: s.worktree ?? undefined,
+        claudeSessionId: s.claude_session_id || undefined,
         messages: JSON.parse(s.messages),
       };
     });
