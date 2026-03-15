@@ -416,6 +416,149 @@ pub async fn handle_request(
             }
         }
 
+        // ── session persistence ────────────────────────────────────────────
+
+        "session.save" => {
+            let session: db::DbSession = match serde_json::from_value(req.params.clone()) {
+                Ok(s) => s,
+                Err(e) => return ErrorResponse::new(req.id, 1002, format!("invalid params: {e}")),
+            };
+            let exists = db::sessions::get_by_id(database, &session.id)
+                .unwrap_or(None)
+                .is_some();
+            let result = if exists {
+                db::sessions::update(database, &session)
+            } else {
+                db::sessions::create(database, &session)
+            };
+            match result {
+                Ok(()) => Response::ok(req.id, json!({ "ok": true })),
+                Err(e) => ErrorResponse::new(req.id, 1003, e),
+            }
+        }
+
+        "session.load" => {
+            let project_id = req.params.get("project_id")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            match db::sessions::list_by_project(database, project_id) {
+                Ok(sessions) => Response::ok(req.id, json!({ "sessions": sessions })),
+                Err(e) => ErrorResponse::new(req.id, 1003, e),
+            }
+        }
+
+        "session.delete" => {
+            let session_id = req.params.get("session_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            match db::sessions::delete(database, &session_id) {
+                Ok(()) => Response::ok(req.id, json!({ "ok": true })),
+                Err(e) => ErrorResponse::new(req.id, 1003, e),
+            }
+        }
+
+        "session.update_messages" => {
+            let session_id = req.params.get("session_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let messages = match req.params.get("messages") {
+                Some(v) if v.is_string() => v.as_str().unwrap().to_string(),
+                Some(v) => v.to_string(),
+                None => "[]".to_string(),
+            };
+            match db::sessions::update_messages(database, &session_id, &messages) {
+                Ok(()) => Response::ok(req.id, json!({ "ok": true })),
+                Err(e) => ErrorResponse::new(req.id, 1003, e),
+            }
+        }
+
+        "session.update_status" => {
+            let session_id = req.params.get("session_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let status = req.params.get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("inbox")
+                .to_string();
+            match db::sessions::update_status(database, &session_id, &status) {
+                Ok(()) => Response::ok(req.id, json!({ "ok": true })),
+                Err(e) => ErrorResponse::new(req.id, 1003, e),
+            }
+        }
+
+        "session.update_position" => {
+            let session_id = req.params.get("session_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let x = req.params.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let y = req.params.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let height = req.params.get("height").and_then(|v| v.as_f64());
+            match db::sessions::update_position(database, &session_id, x, y, height) {
+                Ok(()) => Response::ok(req.id, json!({ "ok": true })),
+                Err(e) => ErrorResponse::new(req.id, 1003, e),
+            }
+        }
+
+        // ── settings persistence ─────────────────────────────────────────────
+
+        "settings.get" => {
+            let key = req.params.get("key")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            match db::settings::get(database, &key) {
+                Ok(value) => Response::ok(req.id, json!({ "value": value })),
+                Err(e) => ErrorResponse::new(req.id, 1003, e),
+            }
+        }
+
+        "settings.set" => {
+            let key = req.params.get("key")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let value = req.params.get("value")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            match db::settings::set(database, &key, &value) {
+                Ok(()) => Response::ok(req.id, json!({ "ok": true })),
+                Err(e) => ErrorResponse::new(req.id, 1003, e),
+            }
+        }
+
+        "settings.delete" => {
+            let key = req.params.get("key")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            match db::settings::delete(database, &key) {
+                Ok(()) => Response::ok(req.id, json!({ "ok": true })),
+                Err(e) => ErrorResponse::new(req.id, 1003, e),
+            }
+        }
+
+        "settings.list" => {
+            let prefix = req.params.get("prefix")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            match db::settings::list_by_prefix(database, &prefix) {
+                Ok(entries) => {
+                    let obj: serde_json::Map<String, serde_json::Value> = entries
+                        .into_iter()
+                        .map(|(k, v)| (k, serde_json::Value::String(v)))
+                        .collect();
+                    Response::ok(req.id, json!({ "settings": obj }))
+                }
+                Err(e) => ErrorResponse::new(req.id, 1003, e),
+            }
+        }
+
         _ => ErrorResponse::new(req.id, 1000, format!("unknown method: {}", req.method)),
     }
 }
