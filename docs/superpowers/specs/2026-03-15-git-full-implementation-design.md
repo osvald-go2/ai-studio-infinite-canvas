@@ -18,8 +18,8 @@ Complete the git functionality in AI Studio Infinite Canvas by fixing data conne
 
 - Electron is the primary runtime; browser mode provides mock demo experience
 - No new state management libraries (React Context + hooks only)
-- Preserve existing `gitService.ts` API layer unchanged
-- Reuse existing diff visualization components (DiffView, DiffSideBySide, etc.)
+- `gitService.ts` stays as the API layer; additive changes (new methods for new backend APIs) are allowed, but existing methods are not modified
+- Reuse existing structured diff components (`DiffView.tsx` which consumes `DiffHunk[]`); the old patch-based components (`DiffPanel.tsx`, `SourceControlPanel.tsx`) will be updated to use the structured `DiffOutput` type
 
 ---
 
@@ -62,7 +62,7 @@ In `App.tsx`, wrapping the area that needs git data. Receives `projectDir` as pr
 
 ### Relationship with Existing Code
 
-- `gitService.ts` stays unchanged (pure API layer)
+- `gitService.ts` stays as the API layer; new methods added for new backend APIs (`fileTree`, `fileContent`, `showCommit`, `watch`, `unwatch`)
 - Components use `useGit()` hook for data, stop calling `gitService` directly
 - UI state in App.tsx (`showGitPanel`, etc.) stays in App.tsx; only git data state moves into Provider
 
@@ -83,6 +83,10 @@ In `App.tsx`, wrapping the area that needs git data. Receives `projectDir` as pr
 - On file change, push event via existing `event_tx`: `git.changed { dir, kind }`
   - `kind` values: `"files"` | `"refs"` | `"head"`
 - **Debounce**: 500ms after file change before pushing, to avoid excessive refreshes during batch operations
+
+### Event Transport
+
+The existing sidecar event infrastructure already supports arbitrary event forwarding: `sidecar.on('event', ...)` in `electron/main.ts` forwards all events from the Rust backend to the renderer via `mainWindow.webContents.send('sidecar:event', eventName, data)`, and `preload.ts` exposes `aiBackend.on(eventName, callback)`. The `git.changed` event will flow through this existing pipeline with no changes to `electron/main.ts` or `preload.ts`.
 
 ### Watch Targets
 
@@ -115,26 +119,26 @@ git.changed { dir, kind }
 
 ## Section 3: CommitGraph — Real Data
 
+### Current State
+
+The `MOCK_COMMITS` constant lives in `SourceControlPanel.tsx` (not CommitGraph.tsx). `CommitGraph.tsx` already calls `gitService.log()` and renders real data including expanded file lists. The existing `CommitFile` type has `path` and `status` but no `additions`/`deletions`.
+
 ### Changes
 
-- Delete `MOCK_COMMITS` constant
-- Read `log: CommitInfo[]` from `useGit()`
-- Click to expand: show files changed in that commit
-
-### New Backend API
-
-- `git.show_commit { dir, hash }` → `{ files: [{ path, status, additions, deletions }] }`
-- Rust: parse output of `git show --stat --format="" <hash>`
+- Delete `MOCK_COMMITS` from `SourceControlPanel.tsx`; replace with data from `useGit()`
+- `CommitGraph.tsx` switches from direct `gitService.log()` calls to `useGit()` hook
+- File list per commit: already returned by `git.log` (via `--name-status`). No new `git.show_commit` API needed — the existing `CommitInfo.files: Vec<CommitFile>` provides path + status per file.
+- **Optional enhancement**: add `additions`/`deletions` to `CommitFile` by augmenting the backend `log()` function to include `--numstat` data. This is a nice-to-have, not a blocker.
 
 ### Interaction
 
 - Linear list: short hash, message, author, relative time
-- Click to expand → file list with status and +/- stats
+- Click to expand → file list with status (and +/- stats if enhanced)
 - Scroll to load more (initial 50, load next batch on scroll to bottom)
 
 ### Browser Mock
 
-Mock commit list migrated from existing MOCK_COMMITS into `mockGitData.ts`, served by GitProvider.
+Mock commit list migrated from existing MOCK_COMMITS in SourceControlPanel.tsx into `mockGitData.ts`, served by GitProvider.
 
 ---
 
@@ -166,24 +170,28 @@ Mock commit list migrated from existing MOCK_COMMITS into `mockGitData.ts`, serv
 
 ### Problem
 
-GitReviewPanel depends on `session.diff` which is always null. No trigger mechanism exists.
+GitReviewPanel depends on `session.diff` which is always null. No trigger mechanism exists. Additionally, `SourceControlPanel.tsx` and `DiffPanel.tsx` use the old `FileDiff`/`GitDiff` types (patch-based string diffs from `types.ts`), which are incompatible with the structured `DiffOutput`/`DiffHunk`/`DiffLine` types from `types/git.ts` that `gitService.diff()` returns.
 
 ### Solution
 
 - Decouple GitReviewPanel from Session entirely
 - Trigger: double-click file in ChangesTab → open GitReviewPanel showing that file's diff
-- Data: call `gitService.diff(dir, file)` directly via `useGit()`, no longer depends on `session.diff`
+- Data: call `gitService.diff(dir, file)` via `useGit()`, which returns `DiffOutput` (structured hunks)
+- **GitReviewPanel uses `DiffView.tsx`** (which already handles `DiffHunk[]`) for rendering, NOT the old `DiffPanel.tsx`/`SourceControlPanel.tsx` which depend on the obsolete `FileDiff` type
+- `SourceControlPanel.tsx` is updated to remove its dependency on `FileDiff`/`GitDiff` and use `useGit()` for changes data instead
 
 ### Cleanup
 
-- Remove `diff?: GitDiff` field from `Session` type
+- Remove `diff?: GitDiff` field from `Session` type in `types.ts`
+- Remove old `FileDiff` and `GitDiff` types from `types.ts` (dead code after migration)
 - Remove `reviewSessionId` state and `handleOpenReview` from App.tsx
+- Update `SessionWindow.tsx` to remove the `session.diff`-based review button (lines referencing `session.diff` for +/- stats display); if change indicators are still needed, derive them from `session.worktreePath` + `useGit().changes`
 - Delete `src/services/mockGit.ts` entirely (unused)
 - GitReviewPanel props: `{ session, onCommit, onDiscard }` → `{ filePath, dir }`
 
 ### Interaction
 
-- Double-click file in ChangesTab → open diff panel (side-by-side or inline)
+- Double-click file in ChangesTab → open diff panel (using DiffView, side-by-side or inline)
 - Within diff panel: stage/unstage/discard current file
 - Close panel → return to ChangesTab
 
@@ -203,7 +211,7 @@ Full mock demo experience in browser, real data in Electron.
   - Actions perform local state mutations (optimistic updates)
   - No `git.watch`, no event listening
 - Mock data consolidated in `src/services/mockGitData.ts` (migrated from existing MOCK_COMMITS + mockGit.ts)
-- `gitService.ts` fallbacks (`if (!isElectron())`) retained as safety net but not triggered by GitProvider path
+- `gitService.ts` fallbacks (`if (!isElectron())`) retained as safety net. Since ALL components will be migrated to use `useGit()` (which handles mock data at the Provider level), these fallbacks will not be triggered in normal operation. They serve only as a defensive layer in case any code path bypasses the Provider.
 
 ---
 
@@ -221,18 +229,21 @@ Full mock demo experience in browser, real data in Electron.
 
 | File | Change |
 |------|--------|
-| `ai-backend/src/router.rs` | Add `git.watch`, `git.unwatch`, `git.show_commit`, `git.file_tree`, `git.file_content` routes |
+| `ai-backend/src/router.rs` | Add `git.watch`, `git.unwatch`, `git.file_tree`, `git.file_content` routes |
 | `ai-backend/src/git/mod.rs` | Register watcher module |
-| `ai-backend/src/git/commands.rs` | Add `show_commit`, `file_tree`, `file_content` functions |
+| `ai-backend/src/git/commands.rs` | Add `file_tree`, `file_content` functions |
 | `ai-backend/Cargo.toml` | Add `notify` dependency |
+| `src/services/git.ts` | Add new methods: `fileTree()`, `fileContent()`, `watch()`, `unwatch()` (additive only) |
 | `src/App.tsx` | Wrap GitProvider, remove `reviewSessionId`/`session.diff` state |
-| `src/types.ts` | Remove `diff` field from Session |
-| `src/types/git.ts` | Add `TreeNode`, `CommitDetail` types |
-| `src/components/git/CommitGraph.tsx` | Delete MOCK_COMMITS, use useGit |
+| `src/types.ts` | Remove `diff` field from Session; remove old `FileDiff`/`GitDiff` types |
+| `src/types/git.ts` | Add `TreeNode` type |
+| `src/components/git/CommitGraph.tsx` | Switch from direct gitService calls to useGit hook |
+| `src/components/git/SourceControlPanel.tsx` | Delete MOCK_COMMITS, use useGit; migrate from FileDiff to DiffOutput types |
 | `src/components/git/FilesTab.tsx` | Implement file tree browser |
-| `src/components/git/GitReviewPanel.tsx` | Decouple from session, accept filePath+dir |
+| `src/components/git/GitReviewPanel.tsx` | Decouple from session, accept filePath+dir; use DiffView instead of old DiffPanel |
 | `src/components/git/ChangesTab.tsx` | Double-click file triggers diff panel |
 | `src/components/git/GitPanel.tsx` | Read data from useGit instead of direct gitService calls |
+| `src/components/SessionWindow.tsx` | Remove `session.diff` references; derive change indicators from useGit if needed |
 
 ### Deleted Files
 
@@ -242,11 +253,10 @@ Full mock demo experience in browser, real data in Electron.
 
 ### Unchanged Files
 
-- `src/services/git.ts` — pure API layer, no changes
-- `DiffView.tsx` / `DiffSideBySide.tsx` / `DiffNewFile.tsx` / `DiffDeletedFile.tsx` — complete, reused as-is
+- `DiffView.tsx` / `DiffSideBySide.tsx` / `DiffNewFile.tsx` / `DiffDeletedFile.tsx` — already consume `DiffHunk[]`, reused as-is
 - `CommitSection.tsx` / `MergeDialog.tsx` / `DiscardWorktreeDialog.tsx` — complete, no changes needed
-- `electron/main.ts` / `electron/preload.ts` — communication layer unchanged
+- `electron/main.ts` / `electron/preload.ts` — event forwarding already handles arbitrary events, no changes needed
 
 ### Scale
 
-~3 new files + ~12 modified files + 1 deleted file
+~3 new files + ~15 modified files + 1 deleted file
