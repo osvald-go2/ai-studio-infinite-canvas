@@ -42,9 +42,11 @@ pub async fn handle_request(
                 .get("max_tokens")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(4096) as u32;
-            let history = req.params.get("history").cloned();
+            let claude_session_id = req.params.get("claude_session_id")
+                .and_then(|v| v.as_str())
+                .map(String::from);
 
-            let session_id = session_manager.create(model, max_tokens, history);
+            let session_id = session_manager.create(model, max_tokens, claude_session_id);
             Response::ok(req.id, json!({"session_id": session_id}))
         }
 
@@ -90,6 +92,17 @@ pub async fn handle_request(
                 .unwrap_or("");
             session_manager.kill(session_id);
             Response::ok(req.id, json!({"ok": true}))
+        }
+
+        "session.interrupt" => {
+            let session_id = match req.params.get("session_id").and_then(|v| v.as_str()) {
+                Some(id) => id,
+                None => return ErrorResponse::new(req.id, 1002, "missing session_id".to_string()),
+            };
+            match session_manager.interrupt(session_id) {
+                Ok(()) => Response::ok(req.id, json!({ "ok": true })),
+                Err(e) => ErrorResponse::new(req.id, e.code(), e.to_string()),
+            }
         }
 
         // ── git commands ────────────────────────────────────────────────────

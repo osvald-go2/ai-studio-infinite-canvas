@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::claude::client::ClaudeProcess;
-use crate::protocol::{Event, OutgoingMessage};
+use crate::protocol::OutgoingMessage;
 use super::types::{Session, SessionSummary};
 
 #[derive(Debug)]
@@ -35,6 +35,7 @@ impl std::fmt::Display for SessionError {
 pub(crate) struct ActiveSession {
     info: Session,
     claude_process: Option<Arc<ClaudeProcess>>,
+    claude_session_id: Option<String>,
 }
 
 pub struct SessionManager {
@@ -67,7 +68,7 @@ impl SessionManager {
         &mut self,
         model: String,
         max_tokens: u32,
-        _history: Option<serde_json::Value>,
+        claude_session_id: Option<String>,
     ) -> String {
         let id = Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
@@ -83,6 +84,7 @@ impl SessionManager {
         let active = ActiveSession {
             info,
             claude_process: None,
+            claude_session_id,
         };
 
         self.sessions.lock().unwrap().insert(id.clone(), active);
@@ -111,19 +113,42 @@ impl SessionManager {
             if let Some(ref process) = active.claude_process {
                 process.clone()
             } else {
-                // Spawn new claude CLI process
+                // Spawn new claude CLI process, passing resume ID if available
                 let working_dir = self.working_dir.clone();
-                let (process, msg_rx) = ClaudeProcess::spawn(&working_dir, None)
+                let resume_id = active.claude_session_id.as_deref();
+                let (process, msg_rx) = ClaudeProcess::spawn(&working_dir, resume_id)
                     .map_err(|e| SessionError::SpawnFailed(e))?;
 
                 let process = Arc::new(process);
                 active.claude_process = Some(process.clone());
 
+                // Create shared slot for claude_session_id capture
+                let claude_sid_slot = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+                let slot_clone = claude_sid_slot.clone();
+
                 // Spawn normalizer task to process claude output
                 let sid = session_id.to_string();
                 let tx = event_tx.clone();
                 tokio::spawn(async move {
-                    crate::normalizer::parser::process_claude_stream(&sid, msg_rx, tx).await;
+                    crate::normalizer::parser::process_claude_stream(&sid, msg_rx, tx, slot_clone).await;
+                });
+
+                // Spawn follow-up task to write claude_session_id back to ActiveSession
+                let sessions_arc = self.sessions_arc();
+                let sid_owned = session_id.to_string();
+                let slot = claude_sid_slot.clone();
+                tokio::spawn(async move {
+                    for _ in 0..50 {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        let val = slot.lock().unwrap().clone();
+                        if let Some(csid) = val {
+                            let mut sessions = sessions_arc.lock().unwrap();
+                            if let Some(active) = sessions.get_mut(&sid_owned) {
+                                active.claude_session_id = Some(csid);
+                            }
+                            break;
+                        }
+                    }
                 });
 
                 process
@@ -172,10 +197,22 @@ impl SessionManager {
         let active = ActiveSession {
             info,
             claude_process: None,
+            claude_session_id: None,
         };
 
         self.sessions.lock().unwrap().insert(id.clone(), active);
         id
+    }
+
+    pub fn interrupt(&self, session_id: &str) -> Result<(), SessionError> {
+        let sessions = self.sessions.lock().unwrap();
+        let active = sessions.get(session_id)
+            .ok_or_else(|| SessionError::NotFound(session_id.to_string()))?;
+        if let Some(ref process) = active.claude_process {
+            process.interrupt()
+                .map_err(|e| SessionError::SpawnFailed(e))?;
+        }
+        Ok(())
     }
 
     pub fn get_working_dir(&self) -> &str {

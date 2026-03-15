@@ -19,13 +19,23 @@ pub async fn process_claude_stream(
     session_id: &str,
     mut msg_rx: mpsc::UnboundedReceiver<ClaudeJson>,
     event_tx: mpsc::UnboundedSender<OutgoingMessage>,
+    claude_sid_slot: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 ) {
     let mut block_index: usize = 0;
 
     while let Some(msg) = msg_rx.recv().await {
         match msg {
-            ClaudeJson::System { subtype, model, tools, .. } => {
+            ClaudeJson::System { subtype, session_id: csid, model, tools, .. } => {
                 if subtype == "init" {
+                    // Capture the claude session ID into the shared slot
+                    if let Some(ref csid_str) = csid {
+                        *claude_sid_slot.lock().unwrap() = Some(csid_str.clone());
+                        let _ = event_tx.send(Event::new("session.init", json!({
+                            "session_id": session_id,
+                            "claude_session_id": csid_str,
+                        })));
+                    }
+
                     let model_str = model.unwrap_or_default();
                     let tool_count = tools.map(|t| t.len()).unwrap_or(0);
                     // Emit as a text block
