@@ -1,15 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { ChevronDown, ChevronRight, ChevronLeft, FileText, FileDiff, Undo2, Loader2 } from 'lucide-react';
 import { FileChange } from '../../types/git';
-import { gitService } from '../../services/git';
+import { useGit } from '../../contexts/GitProvider';
 import { DiffView } from './DiffView';
 import { CommitSection } from './CommitSection';
 import { CommitGraph } from './CommitGraph';
 
 export interface ChangesTabProps {
-  workingDir: string;
-  refreshKey: number;
-  onCommitSuccess: () => void;
+  onOpenDiff?: (filePath: string) => void;
 }
 
 // ── Status letter colors ──
@@ -35,10 +33,12 @@ function StatusLetter({ status }: { status: string }) {
 function FileRow({
   change,
   onClick,
+  onDoubleClick,
   onDiscard,
 }: {
   change: FileChange;
   onClick: () => void;
+  onDoubleClick?: () => void;
   onDiscard: (e: React.MouseEvent) => void;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -47,6 +47,7 @@ function FileRow({
   return (
     <div
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       className="flex items-center justify-between h-[26px] pl-6 pr-3 cursor-pointer hover:bg-white/[0.04] transition-colors"
@@ -87,10 +88,8 @@ function FileRow({
 }
 
 // ── Main component ──
-export function ChangesTab({ workingDir, refreshKey, onCommitSuccess }: ChangesTabProps) {
-  const [changes, setChanges] = useState<FileChange[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [branch, setBranch] = useState('main');
+export function ChangesTab({ onOpenDiff }: ChangesTabProps) {
+  const { changes, info, loading, getDiff, discardFile, refresh } = useGit();
   const [changesOpen, setChangesOpen] = useState(true);
   const [graphOpen, setGraphOpen] = useState(true);
 
@@ -99,24 +98,7 @@ export function ChangesTab({ workingDir, refreshKey, onCommitSuccess }: ChangesT
   const [diffHunks, setDiffHunks] = useState<import('../../types/git').DiffHunk[]>([]);
   const [diffLoading, setDiffLoading] = useState(false);
 
-  // Load changes
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    gitService.changes(workingDir).then((result) => {
-      if (!cancelled) setChanges(result);
-    }).catch((err) => {
-      console.error('Failed to load changes:', err);
-    }).finally(() => {
-      if (!cancelled) setLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, [workingDir, refreshKey]);
-
-  // Load branch name
-  useEffect(() => {
-    gitService.info(workingDir).then((info) => setBranch(info.branch)).catch(() => {});
-  }, [workingDir]);
+  const branch = info.branch || 'main';
 
   // Open diff for a file
   const openDiff = useCallback(async (change: FileChange) => {
@@ -124,25 +106,27 @@ export function ChangesTab({ workingDir, refreshKey, onCommitSuccess }: ChangesT
     setDiffHunks([]);
     setDiffLoading(true);
     try {
-      const result = await gitService.diff(workingDir, change.path);
+      const result = await getDiff(change.path);
       setDiffHunks(result.hunks);
     } catch (err) {
       console.error('Failed to load diff:', err);
     } finally {
       setDiffLoading(false);
     }
-  }, [workingDir]);
+  }, [getDiff]);
 
   const handleDiscard = useCallback(async (e: React.MouseEvent, change: FileChange) => {
     e.stopPropagation();
     try {
-      await gitService.discardFile(workingDir, change.path);
-      // Refresh by re-fetching
-      setChanges((prev) => prev.filter((c) => c.path !== change.path));
+      await discardFile(change.path);
     } catch (err) {
       console.error('Failed to discard:', err);
     }
-  }, [workingDir]);
+  }, [discardFile]);
+
+  const handleCommitSuccess = useCallback(() => {
+    refresh();
+  }, [refresh]);
 
   // ── Diff mode ──
   if (diffFile !== null) {
@@ -220,12 +204,9 @@ export function ChangesTab({ workingDir, refreshKey, onCommitSuccess }: ChangesT
         {changesOpen && (
           <>
             <CommitSection
-              workingDir={workingDir}
               changes={changes}
               branch={branch}
-              onCommitSuccess={() => {
-                onCommitSuccess();
-              }}
+              onCommitSuccess={handleCommitSuccess}
             />
             {changes.length === 0 ? (
               <span className="text-[12px] text-zinc-600 px-3 py-1 block">
@@ -237,6 +218,7 @@ export function ChangesTab({ workingDir, refreshKey, onCommitSuccess }: ChangesT
                   key={change.path}
                   change={change}
                   onClick={() => openDiff(change)}
+                  onDoubleClick={() => onOpenDiff?.(change.path)}
                   onDiscard={(e) => handleDiscard(e, change)}
                 />
               ))
@@ -251,8 +233,6 @@ export function ChangesTab({ workingDir, refreshKey, onCommitSuccess }: ChangesT
       {/* Graph section */}
       <div className="flex-[2] flex flex-col min-h-0 overflow-y-auto custom-scrollbar">
         <CommitGraph
-          workingDir={workingDir}
-          refreshKey={refreshKey}
           open={graphOpen}
           onToggle={() => setGraphOpen((v) => !v)}
         />

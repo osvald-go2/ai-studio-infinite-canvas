@@ -1,21 +1,20 @@
 import React, { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { Sparkles, Check, Loader2 } from 'lucide-react';
 import { FileChange } from '../../types/git';
-import { gitService } from '../../services/git';
+import { useGit } from '../../contexts/GitProvider';
 
 export interface CommitSectionProps {
-  workingDir: string;
   changes: FileChange[];
   branch: string;
   onCommitSuccess: () => void;
 }
 
 export function CommitSection({
-  workingDir,
   changes,
   branch,
   onCommitSuccess,
 }: CommitSectionProps) {
+  const { commit, generateCommitMsg, onCommitMsgStream } = useGit();
   const [commitMessage, setCommitMessage] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCommitting, setIsCommitting] = useState(false);
@@ -60,10 +59,10 @@ export function CommitSection({
     cleanupRef.current = null;
 
     try {
-      const sessionId = await gitService.generateCommitMsg(workingDir);
+      const sessionId = await generateCommitMsg();
 
       let accumulated = '';
-      const cleanup = gitService.onCommitMsgStream(sessionId, (delta) => {
+      const cleanup = onCommitMsgStream(sessionId, (delta) => {
         accumulated += delta;
         setCommitMessage(accumulated.trim().replace(/^["']|["']$/g, ''));
       });
@@ -84,7 +83,22 @@ export function CommitSection({
       setError(`Generate failed: ${err}`);
       setIsGenerating(false);
     }
-  }, [canGenerate, workingDir]);
+  }, [canGenerate, generateCommitMsg, onCommitMsgStream]);
+
+  const handleCommit = useCallback(async () => {
+    if (!canCommit) return;
+    setError(null);
+    setIsCommitting(true);
+    try {
+      await commit(commitMessage.trim());
+      setCommitMessage('');
+      onCommitSuccess();
+    } catch (err) {
+      setError(`Commit failed: ${err}`);
+    } finally {
+      setIsCommitting(false);
+    }
+  }, [canCommit, commit, commitMessage, onCommitSuccess]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -101,22 +115,7 @@ export function CommitSection({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [canGenerate, canCommit, handleGenerate]); // handleCommit added below
-
-  const handleCommit = useCallback(async () => {
-    if (!canCommit) return;
-    setError(null);
-    setIsCommitting(true);
-    try {
-      await gitService.commit(workingDir, commitMessage.trim());
-      setCommitMessage('');
-      onCommitSuccess();
-    } catch (err) {
-      setError(`Commit failed: ${err}`);
-    } finally {
-      setIsCommitting(false);
-    }
-  }, [canCommit, workingDir, commitMessage, onCommitSuccess]);
+  }, [canGenerate, canCommit, handleGenerate, handleCommit]);
 
   return (
     <div className="flex flex-col gap-2 px-3 py-2 border-b border-white/[0.06]">
@@ -129,7 +128,7 @@ export function CommitSection({
             setCommitMessage(e.target.value);
             setError(null);
           }}
-          placeholder={branch ? `Message (⌘↵ to commit on "${branch}")` : 'Commit message...'}
+          placeholder={branch ? `Message (\u2318\u21B5 to commit on "${branch}")` : 'Commit message...'}
           rows={1}
           className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-[7px] pr-8 text-[12px] text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-white/20 resize-none custom-scrollbar overflow-hidden leading-5"
           style={{ minHeight: '34px', maxHeight: '216px', boxSizing: 'border-box' }}
@@ -137,7 +136,7 @@ export function CommitSection({
         <button
           onClick={handleGenerate}
           disabled={!canGenerate}
-          title="AI Generate commit message (⌘G)"
+          title="AI Generate commit message (\u2318G)"
           className="absolute right-1.5 top-[5px] w-6 h-6 rounded-md flex items-center justify-center text-amber-400 hover:text-amber-300 hover:bg-white/10 disabled:opacity-30 transition-colors"
         >
           {isGenerating ? (
@@ -152,7 +151,7 @@ export function CommitSection({
       <button
         onClick={handleCommit}
         disabled={!canCommit}
-        title="Commit (⌘Enter)"
+        title="Commit (\u2318Enter)"
         className="flex items-center justify-center gap-1.5 w-full h-[34px] bg-white/[0.05] border border-white/[0.08] rounded-lg text-[12px] font-semibold text-zinc-100 hover:bg-white/[0.08] disabled:opacity-40 disabled:cursor-default transition-colors"
       >
         {isCommitting ? (
