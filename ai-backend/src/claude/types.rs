@@ -1,94 +1,154 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-/// Request body for POST /v1/messages
-#[derive(Debug, Serialize)]
-pub struct CreateMessageRequest {
-    pub model: String,
-    pub messages: Vec<ApiMessage>,
-    pub max_tokens: u32,
-    pub stream: bool,
+/// Top-level JSON lines from `claude -p --output-format stream-json`
+///
+/// Each line from claude's stdout is one of these variants.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+pub enum ClaudeJson {
+    #[serde(rename = "system")]
+    System {
+        #[serde(default)]
+        subtype: String,
+        #[serde(default)]
+        session_id: Option<String>,
+        #[serde(default)]
+        model: Option<String>,
+        #[serde(default)]
+        tools: Option<Vec<Value>>,
+    },
+
+    #[serde(rename = "assistant")]
+    Assistant {
+        message: AssistantMessage,
+        #[serde(default)]
+        session_id: Option<String>,
+    },
+
+    #[serde(rename = "user")]
+    User {
+        message: UserMessage,
+        #[serde(default)]
+        tool_use_result: Option<ToolUseResult>,
+        #[serde(default)]
+        session_id: Option<String>,
+    },
+
+    #[serde(rename = "result")]
+    Result {
+        #[serde(default)]
+        subtype: String,
+        #[serde(default)]
+        is_error: bool,
+        #[serde(default)]
+        result: Option<String>,
+        #[serde(default)]
+        duration_ms: Option<u64>,
+        #[serde(default)]
+        num_turns: Option<u32>,
+        #[serde(default)]
+        usage: Option<ResultUsage>,
+        #[serde(default)]
+        session_id: Option<String>,
+    },
 }
 
-#[derive(Debug, Serialize, Clone)]
-pub struct ApiMessage {
+#[derive(Debug, Deserialize)]
+pub struct AssistantMessage {
+    #[serde(default)]
+    pub content: Vec<ContentBlock>,
+    #[serde(default)]
+    pub stop_reason: Option<String>,
+    #[serde(default)]
+    pub usage: Option<ApiUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UserMessage {
+    #[serde(default)]
+    pub content: Vec<ContentBlock>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ToolUseResult {
+    #[serde(default)]
+    pub stdout: Option<String>,
+    #[serde(default)]
+    pub stderr: Option<String>,
+    #[serde(default)]
+    pub is_error: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+pub enum ContentBlock {
+    #[serde(rename = "text")]
+    Text {
+        #[serde(default)]
+        text: String,
+    },
+    #[serde(rename = "thinking")]
+    Thinking {
+        #[serde(default)]
+        thinking: String,
+    },
+    #[serde(rename = "tool_use")]
+    ToolUse {
+        #[serde(default)]
+        id: String,
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        input: Value,
+    },
+    #[serde(rename = "tool_result")]
+    ToolResult {
+        #[serde(default)]
+        tool_use_id: String,
+        #[serde(default)]
+        content: Option<Value>,
+        #[serde(default)]
+        is_error: Option<bool>,
+    },
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ApiUsage {
+    #[serde(default)]
+    pub input_tokens: u64,
+    #[serde(default)]
+    pub output_tokens: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ResultUsage {
+    #[serde(default)]
+    pub input_tokens: u64,
+    #[serde(default)]
+    pub output_tokens: u64,
+}
+
+/// Input message format for stream-json stdin
+#[derive(Debug, Serialize)]
+pub struct UserInputMessage {
+    #[serde(rename = "type")]
+    pub msg_type: String,
+    pub message: UserInputContent,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UserInputContent {
     pub role: String,
     pub content: String,
 }
 
-/// SSE event types from Claude streaming API
-#[derive(Debug, Deserialize)]
-#[serde(tag = "type")]
-pub enum StreamEvent {
-    #[serde(rename = "message_start")]
-    MessageStart { message: MessageInfo },
-
-    #[serde(rename = "content_block_start")]
-    ContentBlockStart { index: usize, content_block: ContentBlockInfo },
-
-    #[serde(rename = "content_block_delta")]
-    ContentBlockDelta { index: usize, delta: DeltaInfo },
-
-    #[serde(rename = "content_block_stop")]
-    ContentBlockStop { index: usize },
-
-    #[serde(rename = "message_delta")]
-    MessageDelta { delta: MessageDeltaInfo, usage: Option<UsageInfo> },
-
-    #[serde(rename = "message_stop")]
-    MessageStop,
-
-    #[serde(rename = "ping")]
-    Ping,
-
-    #[serde(rename = "error")]
-    Error { error: ApiError },
-}
-
-#[derive(Debug, Deserialize)]
-pub struct MessageInfo {
-    pub id: Option<String>,
-    pub model: Option<String>,
-    pub usage: Option<UsageInfo>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct UsageInfo {
-    pub input_tokens: Option<u64>,
-    pub output_tokens: Option<u64>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ContentBlockInfo {
-    #[serde(rename = "type")]
-    pub block_type: String,
-    /// For text blocks
-    pub text: Option<String>,
-    /// For tool_use blocks
-    pub id: Option<String>,
-    pub name: Option<String>,
-    pub input: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "type")]
-pub enum DeltaInfo {
-    #[serde(rename = "text_delta")]
-    TextDelta { text: String },
-
-    #[serde(rename = "input_json_delta")]
-    InputJsonDelta { partial_json: String },
-}
-
-#[derive(Debug, Deserialize)]
-pub struct MessageDeltaInfo {
-    pub stop_reason: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ApiError {
-    #[serde(rename = "type")]
-    pub error_type: String,
-    pub message: String,
+/// Parse a single JSON line from claude stdout.
+pub fn parse_line(line: &str) -> Option<ClaudeJson> {
+    match serde_json::from_str::<ClaudeJson>(line) {
+        Ok(msg) => Some(msg),
+        Err(_) => None, // Unknown type, skip
+    }
 }
 
 #[cfg(test)]
@@ -96,28 +156,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_deserialize_content_block_start_text() {
-        let json = r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#;
-        let event: StreamEvent = serde_json::from_str(json).unwrap();
-        match event {
-            StreamEvent::ContentBlockStart { index, content_block } => {
-                assert_eq!(index, 0);
-                assert_eq!(content_block.block_type, "text");
+    fn test_parse_system_init() {
+        let json = r#"{"type":"system","subtype":"init","session_id":"s1","model":"claude-sonnet-4-20250514","tools":[]}"#;
+        let msg = parse_line(json).unwrap();
+        match msg {
+            ClaudeJson::System { subtype, model, .. } => {
+                assert_eq!(subtype, "init");
+                assert_eq!(model.unwrap(), "claude-sonnet-4-20250514");
             }
             _ => panic!("wrong variant"),
         }
     }
 
     #[test]
-    fn test_deserialize_text_delta() {
-        let json = r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}"#;
-        let event: StreamEvent = serde_json::from_str(json).unwrap();
-        match event {
-            StreamEvent::ContentBlockDelta { index, delta } => {
-                assert_eq!(index, 0);
-                match delta {
-                    DeltaInfo::TextDelta { text } => assert_eq!(text, "Hello"),
-                    _ => panic!("wrong delta variant"),
+    fn test_parse_assistant_text() {
+        let json = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Hello!"}]}}"#;
+        let msg = parse_line(json).unwrap();
+        match msg {
+            ClaudeJson::Assistant { message, .. } => {
+                assert_eq!(message.content.len(), 1);
+                match &message.content[0] {
+                    ContentBlock::Text { text } => assert_eq!(text, "Hello!"),
+                    _ => panic!("wrong content block"),
                 }
             }
             _ => panic!("wrong variant"),
@@ -125,29 +185,40 @@ mod tests {
     }
 
     #[test]
-    fn test_deserialize_tool_use_start() {
-        let json = r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu_1","name":"Bash","input":{}}}"#;
-        let event: StreamEvent = serde_json::from_str(json).unwrap();
-        match event {
-            StreamEvent::ContentBlockStart { index, content_block } => {
-                assert_eq!(index, 1);
-                assert_eq!(content_block.block_type, "tool_use");
-                assert_eq!(content_block.name.unwrap(), "Bash");
+    fn test_parse_assistant_tool_use() {
+        let json = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"ls"}}]}}"#;
+        let msg = parse_line(json).unwrap();
+        match msg {
+            ClaudeJson::Assistant { message, .. } => {
+                match &message.content[0] {
+                    ContentBlock::ToolUse { name, input, .. } => {
+                        assert_eq!(name, "Bash");
+                        assert_eq!(input["command"], "ls");
+                    }
+                    _ => panic!("wrong content block"),
+                }
             }
             _ => panic!("wrong variant"),
         }
     }
 
     #[test]
-    fn test_serialize_request() {
-        let req = CreateMessageRequest {
-            model: "claude-sonnet-4-20250514".into(),
-            messages: vec![ApiMessage { role: "user".into(), content: "hi".into() }],
-            max_tokens: 4096,
-            stream: true,
-        };
-        let json = serde_json::to_string(&req).unwrap();
-        assert!(json.contains("\"stream\":true"));
-        assert!(json.contains("\"max_tokens\":4096"));
+    fn test_parse_result() {
+        let json = r#"{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"num_turns":3,"usage":{"input_tokens":100,"output_tokens":200}}"#;
+        let msg = parse_line(json).unwrap();
+        match msg {
+            ClaudeJson::Result { is_error, duration_ms, usage, .. } => {
+                assert!(!is_error);
+                assert_eq!(duration_ms.unwrap(), 1234);
+                assert_eq!(usage.unwrap().output_tokens, 200);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_unknown_type_returns_none() {
+        let json = r#"{"type":"rate_limit_event","data":{}}"#;
+        assert!(parse_line(json).is_none());
     }
 }

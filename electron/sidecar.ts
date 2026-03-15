@@ -1,6 +1,7 @@
 import { spawn, ChildProcess } from 'child_process';
 import { createInterface, Interface } from 'readline';
 import path from 'path';
+import { app } from 'electron';
 import { EventEmitter } from 'events';
 
 interface PendingRequest {
@@ -21,9 +22,10 @@ export class SidecarManager extends EventEmitter {
   }
 
   private getDefaultBinaryPath(): string {
-    const isDev = process.env.NODE_ENV !== 'production';
+    const isDev = !app.isPackaged;
     if (isDev) {
-      return path.join(__dirname, '..', 'ai-backend', 'target', 'debug', 'ai-backend');
+      // In dev, app.getAppPath() points to the project root
+      return path.join(app.getAppPath(), 'ai-backend', 'target', 'debug', 'ai-backend');
     }
     return path.join(process.resourcesPath!, 'ai-backend');
   }

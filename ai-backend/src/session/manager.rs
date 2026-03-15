@@ -3,22 +3,21 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::protocol::OutgoingMessage;
-use super::types::{ChatMessage, Session, SessionSummary};
+use crate::claude::client::ClaudeProcess;
+use crate::protocol::{Event, OutgoingMessage};
+use super::types::{Session, SessionSummary};
 
 #[derive(Debug)]
 pub enum SessionError {
     NotFound(String),
-    NoApiKey,
-    ApiError(String),
+    SpawnFailed(String),
 }
 
 impl SessionError {
     pub fn code(&self) -> i32 {
         match self {
             SessionError::NotFound(_) => 1001,
-            SessionError::NoApiKey => 401,
-            SessionError::ApiError(_) => 1004,
+            SessionError::SpawnFailed(_) => 1004,
         }
     }
 }
@@ -27,72 +26,66 @@ impl std::fmt::Display for SessionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SessionError::NotFound(id) => write!(f, "session not found: {}", id),
-            SessionError::NoApiKey => write!(f, "no API key configured"),
-            SessionError::ApiError(msg) => write!(f, "API error: {}", msg),
+            SessionError::SpawnFailed(msg) => write!(f, "spawn failed: {}", msg),
         }
     }
 }
 
-pub struct SessionManager {
-    pub(crate) inner: Arc<Mutex<SessionManagerInner>>,
+/// Each active session holds a reference to the spawned claude process.
+struct ActiveSession {
+    info: Session,
+    claude_process: Option<Arc<ClaudeProcess>>,
 }
 
-pub struct SessionManagerInner {
-    pub sessions: HashMap<String, Session>,
-    pub api_key: Option<String>,
+pub struct SessionManager {
+    sessions: Arc<Mutex<HashMap<String, ActiveSession>>>,
+    working_dir: String,
 }
 
 impl SessionManager {
     pub fn new() -> Self {
+        // Default working dir is current directory
+        let working_dir = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".to_string());
+
         SessionManager {
-            inner: Arc::new(Mutex::new(SessionManagerInner {
-                sessions: HashMap::new(),
-                api_key: None,
-            })),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            working_dir,
         }
     }
 
-    pub fn set_api_key(&mut self, key: String) {
-        self.inner.lock().unwrap().api_key = Some(key);
+    pub fn set_api_key(&mut self, _key: String) {
+        // No-op: claude CLI handles its own authentication
+    }
+
+    pub fn set_working_dir(&mut self, dir: String) {
+        self.working_dir = dir;
     }
 
     pub fn create(
         &mut self,
         model: String,
         max_tokens: u32,
-        history: Option<serde_json::Value>,
+        _history: Option<serde_json::Value>,
     ) -> String {
         let id = Uuid::new_v4().to_string();
-        let mut messages = Vec::new();
-
-        // Restore history if provided (crash recovery)
-        // Filter out "system" role — Claude API requires system prompt as a
-        // separate field, not in the messages array
-        if let Some(history_val) = history {
-            if let Some(arr) = history_val.as_array() {
-                for msg in arr {
-                    let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("user");
-                    if role == "system" {
-                        continue;
-                    }
-                    let content = msg.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                    messages.push(ChatMessage {
-                        role: role.to_string(),
-                        content: content.to_string(),
-                    });
-                }
-            }
-        }
-
         let now = chrono::Utc::now().to_rfc3339();
-        let session = Session {
+
+        let info = Session {
             id: id.clone(),
             model,
             max_tokens,
-            messages,
+            messages: Vec::new(),
             created_at: now,
         };
-        self.inner.lock().unwrap().sessions.insert(id.clone(), session);
+
+        let active = ActiveSession {
+            info,
+            claude_process: None,
+        };
+
+        self.sessions.lock().unwrap().insert(id.clone(), active);
         id
     }
 
@@ -102,115 +95,63 @@ impl SessionManager {
         text: &str,
         event_tx: mpsc::UnboundedSender<OutgoingMessage>,
     ) -> Result<(), SessionError> {
-        let (api_key, model, max_tokens, mut api_messages) = {
-            let inner = self.inner.lock().unwrap();
-            let session = inner.sessions.get(session_id)
-                .ok_or_else(|| SessionError::NotFound(session_id.to_string()))?;
-            let api_key = inner.api_key.clone()
-                .ok_or(SessionError::NoApiKey)?;
-
-            let api_messages: Vec<crate::claude::types::ApiMessage> = session.messages.iter()
-                .map(|m| crate::claude::types::ApiMessage {
-                    role: m.role.clone(),
-                    content: m.content.clone(),
-                })
-                .collect();
-
-            (api_key, session.model.clone(), session.max_tokens, api_messages)
-        };
-
-        // Append user message
+        // Check session exists
         {
-            let mut inner = self.inner.lock().unwrap();
-            let session = inner.sessions.get_mut(session_id).unwrap();
-            session.messages.push(ChatMessage {
-                role: "user".into(),
-                content: text.to_string(),
-            });
+            let sessions = self.sessions.lock().unwrap();
+            if !sessions.contains_key(session_id) {
+                return Err(SessionError::NotFound(session_id.to_string()));
+            }
         }
 
-        // Add user message to API request
-        api_messages.push(crate::claude::types::ApiMessage {
-            role: "user".into(),
-            content: text.to_string(),
-        });
+        // Get or spawn claude process for this session
+        let claude_process = {
+            let mut sessions = self.sessions.lock().unwrap();
+            let active = sessions.get_mut(session_id).unwrap();
 
-        let sid = session_id.to_string();
-        let inner_ref = self.inner.clone();
+            if let Some(ref process) = active.claude_process {
+                process.clone()
+            } else {
+                // Spawn new claude CLI process
+                let working_dir = self.working_dir.clone();
+                let (process, msg_rx) = ClaudeProcess::spawn(&working_dir)
+                    .map_err(|e| SessionError::SpawnFailed(e))?;
 
-        // Spawn streaming task
-        tokio::spawn(async move {
-            let client = crate::claude::client::ClaudeClient::new(api_key);
+                let process = Arc::new(process);
+                active.claude_process = Some(process.clone());
 
-            let response = match client.stream_message(&model, api_messages, max_tokens).await {
-                Ok(r) => r,
-                Err(e) => {
-                    let _ = event_tx.send(crate::protocol::Event::new("message.error", serde_json::json!({
-                        "session_id": sid,
-                        "error": { "code": 503, "message": format!("network error: {}", e) },
-                    })));
-                    return;
-                }
-            };
+                // Spawn normalizer task to process claude output
+                let sid = session_id.to_string();
+                let tx = event_tx.clone();
+                tokio::spawn(async move {
+                    crate::normalizer::parser::process_claude_stream(&sid, msg_rx, tx).await;
+                });
 
-            if !response.status().is_success() {
-                let status = response.status().as_u16();
-                let code = if status == 401 { 401 } else { status as i32 };
-                let body = response.text().await.unwrap_or_default();
-                let _ = event_tx.send(crate::protocol::Event::new("message.error", serde_json::json!({
-                    "session_id": sid,
-                    "error": { "code": code, "message": body },
-                })));
-                return;
+                process
             }
+        };
 
-            // Parse SSE stream
-            let byte_stream = response.bytes_stream();
-            let (sse_tx, sse_rx) = mpsc::unbounded_channel();
-
-            let stream_event_tx = event_tx.clone();
-            let stream_sid = sid.clone();
-
-            // SSE parser task
-            tokio::spawn(async move {
-                crate::claude::stream::parse_sse_stream(byte_stream, sse_tx).await;
-            });
-
-            // Normalizer task — returns accumulated assistant text
-            let assistant_text = crate::normalizer::parser::process_stream(
-                &stream_sid, sse_rx, stream_event_tx
-            ).await;
-
-            // Append assistant message to session history for multi-turn context
-            if !assistant_text.is_empty() {
-                let mut inner = inner_ref.lock().unwrap();
-                if let Some(session) = inner.sessions.get_mut(&sid) {
-                    session.messages.push(ChatMessage {
-                        role: "assistant".into(),
-                        content: assistant_text,
-                    });
-                }
-            }
-        });
+        // Send user message to claude process
+        claude_process.send_message(text).await
+            .map_err(|e| SessionError::SpawnFailed(e))?;
 
         Ok(())
     }
 
     pub fn list(&self) -> Vec<SessionSummary> {
-        let inner = self.inner.lock().unwrap();
-        inner
-            .sessions
+        let sessions = self.sessions.lock().unwrap();
+        sessions
             .values()
             .map(|s| SessionSummary {
-                id: s.id.clone(),
-                model: s.model.clone(),
-                message_count: s.messages.len(),
-                created_at: s.created_at.clone(),
+                id: s.info.id.clone(),
+                model: s.info.model.clone(),
+                message_count: s.info.messages.len(),
+                created_at: s.info.created_at.clone(),
             })
             .collect()
     }
 
     pub fn kill(&mut self, session_id: &str) {
-        self.inner.lock().unwrap().sessions.remove(session_id);
+        self.sessions.lock().unwrap().remove(session_id);
+        // ClaudeProcess will be dropped, killing the child process
     }
 }
