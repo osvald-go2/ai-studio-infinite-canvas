@@ -18,7 +18,7 @@ impl ClaudeProcess {
     ///
     /// Command: `claude -p --output-format stream-json --input-format stream-json
     ///           --verbose --no-chrome --dangerously-skip-permissions`
-    pub fn spawn(working_dir: &str) -> Result<(Self, mpsc::UnboundedReceiver<ClaudeJson>), String> {
+    pub fn spawn(working_dir: &str, resume_session_id: Option<&str>) -> Result<(Self, mpsc::UnboundedReceiver<ClaudeJson>), String> {
         let mut cmd = Command::new("claude");
         cmd.args([
             "-p",
@@ -30,6 +30,9 @@ impl ClaudeProcess {
             "--mcp-config", r#"{"mcpServers":{}}"#,
             "--strict-mcp-config",
         ]);
+        if let Some(sid) = resume_session_id {
+            cmd.args(["--resume", sid]);
+        }
         cmd.current_dir(working_dir);
 
         // Prevent nested claude session detection

@@ -113,7 +113,7 @@ impl SessionManager {
             } else {
                 // Spawn new claude CLI process
                 let working_dir = self.working_dir.clone();
-                let (process, msg_rx) = ClaudeProcess::spawn(&working_dir)
+                let (process, msg_rx) = ClaudeProcess::spawn(&working_dir, None)
                     .map_err(|e| SessionError::SpawnFailed(e))?;
 
                 let process = Arc::new(process);
