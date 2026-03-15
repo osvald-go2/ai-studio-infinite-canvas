@@ -2,6 +2,7 @@ use serde_json::json;
 use tokio::sync::mpsc;
 
 use crate::db::{self, Database};
+use crate::git::watcher::GitWatcherManager;
 use crate::protocol::{ErrorResponse, OutgoingMessage, Request, Response};
 use crate::session::manager::SessionManager;
 use crate::git::{commands as git_cmd, worktree as git_wt};
@@ -11,6 +12,7 @@ pub async fn handle_request(
     session_manager: &mut SessionManager,
     event_tx: mpsc::UnboundedSender<OutgoingMessage>,
     database: &Database,
+    git_watcher: &GitWatcherManager,
 ) -> OutgoingMessage {
     match req.method.as_str() {
         "ping" => Response::ok(req.id, json!({"pong": true})),
@@ -307,6 +309,46 @@ pub async fn handle_request(
             }
         }
 
+        "git.file_tree" => {
+            let dir = get_dir(&req, session_manager);
+            match git_cmd::file_tree(&dir) {
+                Ok(files) => Response::ok(req.id, json!({"files": files})),
+                Err(e) => ErrorResponse::new(req.id, 2017, e),
+            }
+        }
+
+        "git.file_content" => {
+            let dir = get_dir(&req, session_manager);
+            let path = req.params.get("path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let git_ref = req.params.get("ref")
+                .and_then(|v| v.as_str());
+            if path.is_empty() {
+                return ErrorResponse::new(req.id, 1002, "path is required".into());
+            }
+            match git_cmd::file_content(&dir, path, git_ref) {
+                Ok(content) => Response::ok(req.id, json!({"content": content})),
+                Err(e) => ErrorResponse::new(req.id, 2018, e),
+            }
+        }
+
+        "git.watch" => {
+            let dir = get_dir(&req, session_manager);
+            match git_watcher.watch(&dir, event_tx.clone()) {
+                Ok(()) => Response::ok(req.id, json!({"ok": true})),
+                Err(e) => ErrorResponse::new(req.id, 2019, e),
+            }
+        }
+
+        "git.unwatch" => {
+            let dir = get_dir(&req, session_manager);
+            match git_watcher.unwatch(&dir) {
+                Ok(()) => Response::ok(req.id, json!({"ok": true})),
+                Err(e) => ErrorResponse::new(req.id, 2020, e),
+            }
+        }
+
         // ── AI commit message generation ─────────────────────────────────────
 
         "git.generate_commit_msg" => {
@@ -383,6 +425,7 @@ pub async fn handle_request(
                 Err(e) => return ErrorResponse::new(req.id, 1003, e),
             };
 
+            eprintln!("[db] project.open: id={} path={}", project.id, project.path);
             session_manager.set_working_dir(path);
 
             Response::ok(req.id, serde_json::to_value(&project).unwrap())
@@ -429,6 +472,7 @@ pub async fn handle_request(
             let result = if exists {
                 db::sessions::update(database, &session)
             } else {
+                eprintln!("[db] session.save: new session id={} title={}", session.id, session.title);
                 db::sessions::create(database, &session)
             };
             match result {
@@ -442,7 +486,10 @@ pub async fn handle_request(
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0);
             match db::sessions::list_by_project(database, project_id) {
-                Ok(sessions) => Response::ok(req.id, json!({ "sessions": sessions })),
+                Ok(sessions) => {
+                    eprintln!("[db] session.load: project_id={} count={}", project_id, sessions.len());
+                    Response::ok(req.id, json!({ "sessions": sessions }))
+                }
                 Err(e) => ErrorResponse::new(req.id, 1003, e),
             }
         }
@@ -452,6 +499,7 @@ pub async fn handle_request(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
+            eprintln!("[db] session.delete: id={}", session_id);
             match db::sessions::delete(database, &session_id) {
                 Ok(()) => Response::ok(req.id, json!({ "ok": true })),
                 Err(e) => ErrorResponse::new(req.id, 1003, e),
@@ -483,6 +531,7 @@ pub async fn handle_request(
                 .and_then(|v| v.as_str())
                 .unwrap_or("inbox")
                 .to_string();
+            eprintln!("[db] session.update_status: id={} status={}", session_id, status);
             match db::sessions::update_status(database, &session_id, &status) {
                 Ok(()) => Response::ok(req.id, json!({ "ok": true })),
                 Err(e) => ErrorResponse::new(req.id, 1003, e),

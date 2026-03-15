@@ -10,6 +10,7 @@ mod claude;
 mod normalizer;
 mod git;
 
+use git::watcher::GitWatcherManager;
 use protocol::{ErrorResponse, OutgoingMessage, Request};
 use session::manager::SessionManager;
 
@@ -25,6 +26,8 @@ async fn main() {
     let database = db::Database::open_default()
         .expect("failed to initialize database");
     eprintln!("[ai-backend] database initialized");
+
+    let git_watcher = GitWatcherManager::new();
 
     // Channel for streaming events (written to stdout)
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<OutgoingMessage>();
@@ -78,7 +81,7 @@ async fn main() {
             }
         };
 
-        let result = router::handle_request(req, &mut session_manager, event_tx.clone(), &database).await;
+        let result = router::handle_request(req, &mut session_manager, event_tx.clone(), &database, &git_watcher).await;
         if let Ok(json) = serde_json::to_string(&result) {
             let _ = out_tx.send(json);
         }
