@@ -32,13 +32,13 @@ impl std::fmt::Display for SessionError {
 }
 
 /// Each active session holds a reference to the spawned claude process.
-struct ActiveSession {
+pub(crate) struct ActiveSession {
     info: Session,
     claude_process: Option<Arc<ClaudeProcess>>,
 }
 
 pub struct SessionManager {
-    sessions: Arc<Mutex<HashMap<String, ActiveSession>>>,
+    pub(crate) sessions: Arc<Mutex<HashMap<String, ActiveSession>>>,
     working_dir: String,
 }
 
@@ -153,5 +153,37 @@ impl SessionManager {
     pub fn kill(&mut self, session_id: &str) {
         self.sessions.lock().unwrap().remove(session_id);
         // ClaudeProcess will be dropped, killing the child process
+    }
+
+    /// Create a temporary session with an "ephemeral-" prefixed ID.
+    /// Ephemeral sessions are used for one-shot AI tasks (e.g. commit message generation).
+    pub fn create_ephemeral_session(&mut self, model: String, max_tokens: u32) -> String {
+        let id = format!("ephemeral-{}", uuid::Uuid::new_v4());
+        let now = chrono::Utc::now().to_rfc3339();
+
+        let info = super::types::Session {
+            id: id.clone(),
+            model,
+            max_tokens,
+            messages: Vec::new(),
+            created_at: now,
+        };
+
+        let active = ActiveSession {
+            info,
+            claude_process: None,
+        };
+
+        self.sessions.lock().unwrap().insert(id.clone(), active);
+        id
+    }
+
+    pub fn get_working_dir(&self) -> &str {
+        &self.working_dir
+    }
+
+    /// Return a clone of the sessions Arc so callers can schedule deferred cleanup.
+    pub(crate) fn sessions_arc(&self) -> std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, ActiveSession>>> {
+        self.sessions.clone()
     }
 }
