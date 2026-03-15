@@ -1,11 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, FileText, Loader2 } from 'lucide-react';
-import { CommitInfo } from '../../types/git';
-import { gitService } from '../../services/git';
+import React, { useState } from 'react';
+import { ChevronDown, ChevronRight, FileText } from 'lucide-react';
+import { useGit } from '../../contexts/GitProvider';
 
 export interface CommitGraphProps {
-  workingDir: string;
-  refreshKey: number;
   open?: boolean;
   onToggle?: () => void;
 }
@@ -19,27 +16,21 @@ const statusClass: Record<string, string> = {
 };
 
 export function CommitGraph({
-  workingDir,
-  refreshKey,
   open = true,
   onToggle,
 }: CommitGraphProps) {
-  const [commits, setCommits] = useState<CommitInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { log: commits, loading } = useGit();
   const [expandedCommits, setExpandedCommits] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    gitService.log(workingDir, 50).then((result) => {
-      if (!cancelled) setCommits(result);
-    }).catch((err) => {
-      console.error('Failed to load git log:', err);
-    }).finally(() => {
-      if (!cancelled) setLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, [workingDir, refreshKey]);
+  // Scroll pagination
+  const [displayCount, setDisplayCount] = useState(50);
+  const visibleCommits = commits.slice(0, displayCount);
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    if (scrollHeight - scrollTop - clientHeight < 50) {
+      setDisplayCount(prev => Math.min(prev + 50, commits.length));
+    }
+  };
 
   const toggleCommit = (hash: string) => {
     setExpandedCommits((prev) => {
@@ -67,18 +58,17 @@ export function CommitGraph({
       </div>
 
       {open && (
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
+        <div className="flex-1 overflow-y-auto custom-scrollbar" onScroll={handleScroll}>
           {loading ? (
             <div className="flex items-center gap-2 px-3 py-2 text-zinc-600 text-[12px]">
-              <Loader2 size={12} className="animate-spin" />
               Loading...
             </div>
-          ) : commits.length === 0 ? (
+          ) : visibleCommits.length === 0 ? (
             <span className="text-[12px] text-zinc-600 px-3 py-1 block">
               No commits
             </span>
           ) : (
-            commits.map((commit) => {
+            visibleCommits.map((commit) => {
               const isExpanded = expandedCommits.has(commit.hash);
               return (
                 <div key={commit.hash}>
