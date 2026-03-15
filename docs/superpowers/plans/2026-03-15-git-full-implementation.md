@@ -1251,7 +1251,7 @@ interface GitReviewPanelProps {
 
 - Remove `SourceControlPanel` and `DiffPanel` imports
 - Add `import { useGit } from '../../contexts/GitProvider';`
-- Add `import DiffView from './DiffView';` (verify the exact component name and import path)
+- Add `import { DiffView } from './DiffView';` (named export)
 - Fetch diff on `filePath` change:
   ```typescript
   const { getDiff, stageFile, unstageFile, discardFile } = useGit();
@@ -1642,8 +1642,7 @@ Task 5 (mount GitProvider) ─────────────────�
 Tasks 10-14 ────────────────────────────────┤
                                             ├─> Task 15 (GitReviewPanel)
                                             ├─> Task 16 (types cleanup)
-                                            ├─> Task 17 (SessionWindow cleanup)
-                                            ├─> Task 18 (delete dead files)
+                                            ├─> Task 17 (SessionWindow cleanup) ─> Task 18 (delete dead files)
                                             ├─> Task 19 (FilesTab)
                                             │
 Tasks 15-19 ────────────────────────────────┴─> Task 20 (final verification)
@@ -1654,4 +1653,4 @@ Tasks 15-19 ──────────────────────�
 - Tasks 2, 3 can run in parallel after Task 1
 - Tasks 7, 8 can run in parallel after Task 6
 - Tasks 10, 11, 12, 13, 14 can all run in parallel after Task 5
-- Tasks 15, 16, 17, 18, 19 can run in parallel after Tasks 10-14
+- Tasks 15, 16, 17, 19 can run in parallel after Tasks 10-14. Task 18 must follow Task 17.
