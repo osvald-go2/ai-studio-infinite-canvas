@@ -182,6 +182,14 @@ ipcMain.handle('scan-skills', async (_, platform: string, projectDir: string) =>
   await walkDir(projectSkillsDir, 'project');
   await walkDir(userSkillsDir, 'user');
 
+  // Scan plugin skills (Claude only)
+  if (platform === 'claude') {
+    const pluginEntries = await getPluginSkillEntries(projectDir);
+    for (const entry of pluginEntries) {
+      await walkDir(entry.skillsDir, entry.source, entry.pluginName);
+    }
+  }
+
   const seen = new Set<string>();
   return results.filter(s => {
     if (seen.has(s.name)) return false;
@@ -204,6 +212,80 @@ function parseSkillFrontmatter(content: string): { name: string; description: st
     name: nameMatch[1].trim(),
     description: descMatch ? descMatch[1].trim() : '',
   };
+}
+
+interface PluginSkillEntry {
+  pluginName: string;
+  skillsDir: string;
+  source: 'project' | 'user';
+}
+
+async function getPluginSkillEntries(projectDir: string): Promise<PluginSkillEntry[]> {
+  const claudeDir = path.join(os.homedir(), '.claude');
+
+  let installedData: any;
+  try {
+    const raw = await fs.promises.readFile(path.join(claudeDir, 'plugins', 'installed_plugins.json'), 'utf-8');
+    installedData = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+
+  let enabledPlugins: Record<string, boolean> = {};
+  try {
+    const raw = await fs.promises.readFile(path.join(claudeDir, 'settings.json'), 'utf-8');
+    const settings = JSON.parse(raw);
+    enabledPlugins = settings.enabledPlugins || {};
+  } catch {
+    return [];
+  }
+
+  const plugins = installedData?.plugins;
+  if (!plugins || typeof plugins !== 'object') return [];
+
+  const entries: PluginSkillEntry[] = [];
+
+  for (const [pluginKey, installations] of Object.entries(plugins)) {
+    if (!enabledPlugins[pluginKey]) continue;
+
+    const pluginName = pluginKey.split('@')[0];
+
+    if (!Array.isArray(installations)) continue;
+
+    for (const inst of installations as any[]) {
+      const { scope, installPath, projectPath } = inst;
+      if (!installPath) continue;
+
+      if (scope === 'project') {
+        if (projectPath !== projectDir) continue;
+      } else if (scope !== 'user') {
+        continue;
+      }
+
+      // Resolve skills directory from plugin.json
+      let skillsDir = path.join(installPath, 'skills');
+      try {
+        const pluginJsonRaw = await fs.promises.readFile(path.join(installPath, '.claude-plugin', 'plugin.json'), 'utf-8');
+        const pluginJson = JSON.parse(pluginJsonRaw);
+        if (pluginJson.skills && typeof pluginJson.skills === 'string') {
+          skillsDir = path.resolve(installPath, pluginJson.skills);
+        }
+      } catch {
+        // plugin.json missing or invalid — use default skills/ dir
+      }
+
+      entries.push({
+        pluginName,
+        skillsDir,
+        source: scope === 'project' ? 'project' : 'user',
+      });
+    }
+  }
+
+  // Ensure project-scoped entries come before user-scoped for correct dedup priority
+  entries.sort((a, b) => (a.source === 'project' ? 0 : 1) - (b.source === 'project' ? 0 : 1));
+
+  return entries;
 }
 
 // ── PTY IPC handlers ──
