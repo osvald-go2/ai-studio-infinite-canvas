@@ -6,7 +6,9 @@ import { MessageRenderer } from './message/MessageRenderer';
 import { STRUCTURED_MOCK_RESPONSES } from '../utils/mockResponses';
 import { backend } from '../services/backend';
 
-const isElectron = typeof window !== 'undefined' && window.aiBackend !== undefined;
+function isElectron(): boolean {
+  return typeof window !== 'undefined' && window.aiBackend !== undefined;
+}
 let mockResponseIndex = 0;
 
 export function SessionWindow({
@@ -61,7 +63,7 @@ export function SessionWindow({
 
   // Backend event listeners for Electron mode
   useEffect(() => {
-    if (!isElectron) return;
+    if (!isElectron()) return;
 
     const blockMap = new Map<number, ContentBlock>();
 
@@ -170,7 +172,7 @@ export function SessionWindow({
         streamingMessageIdRef.current = aiMsgId;
         isStreamingRef.current = true;
 
-        if (isElectron) {
+        if (isElectron()) {
           if (!backendSessionIdRef.current) {
             const sid = await backend.createSession(session.model);
             backendSessionIdRef.current = sid;
@@ -241,7 +243,7 @@ export function SessionWindow({
     streamingMessageIdRef.current = aiMsgId;
     isStreamingRef.current = true;
 
-    if (isElectron) {
+    if (isElectron()) {
       // Create backend session if not already created
       if (!backendSessionIdRef.current) {
         const sid = await backend.createSession(session.model);
