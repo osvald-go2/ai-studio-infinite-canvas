@@ -92,7 +92,5 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   sidecar?.kill();
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  app.quit();
 });
