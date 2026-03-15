@@ -51,8 +51,11 @@ export function SessionWindow({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerIndex, setPickerIndex] = useState(0);
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   const isStreamingRef = useRef(false);
+  const historyRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const sessionRef = useRef(session);
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -77,6 +80,32 @@ export function SessionWindow({
   useEffect(() => {
     scrollToBottom();
   }, [session.messages, isStreaming]);
+
+  // Close history popover on any click outside (using capture phase to bypass stopPropagation)
+  useEffect(() => {
+    if (!showHistory) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (historyRef.current && !historyRef.current.contains(e.target as Node)) {
+        setShowHistory(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside, true);
+    return () => document.removeEventListener('mousedown', handleClickOutside, true);
+  }, [showHistory]);
+
+  const formatRelativeTime = (ts?: number) => {
+    if (!ts) return '';
+    const diff = Math.floor((Date.now() - ts) / 1000);
+    if (diff < 60) return '刚刚';
+    if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
+    return `${Math.floor(diff / 86400)} 天前`;
+  };
+
+  const recentUserMessages = session.messages
+    .filter(m => m.role === 'user')
+    .slice(-5)
+    .reverse();
 
   // Backend event listeners for Electron mode
   useEffect(() => {
@@ -255,7 +284,8 @@ export function SessionWindow({
       id: Date.now().toString(),
       role: 'user',
       content: inputValue,
-      type: 'text'
+      type: 'text',
+      timestamp: Date.now()
     };
 
     const aiMsgId = (Date.now() + 1).toString();
@@ -527,7 +557,47 @@ export function SessionWindow({
       {isTab ? (
         <div className="flex items-center justify-end py-4 px-6 select-none shrink-0">
           <div className="flex items-center gap-2 text-[#9CA3AF]">
-            <button className="hover:text-gray-200 transition-colors"><Clock size={18} /></button>
+            <div className="relative" ref={historyRef}>
+              <button
+                onClick={() => setShowHistory(!showHistory)}
+                className={`hover:text-gray-200 transition-colors ${showHistory ? 'text-gray-200' : ''}`}
+                title="最近消息"
+              >
+                <Clock size={18} />
+              </button>
+              {showHistory && (
+                <div className="absolute right-0 top-full mt-2 w-72 bg-[#1E1814]/95 backdrop-blur-2xl border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50">
+                  <div className="px-3 py-2 border-b border-white/5 text-xs font-medium text-gray-500">最近发送的消息</div>
+                  <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                    {recentUserMessages.length > 0 ? recentUserMessages.map(msg => (
+                      <button
+                        key={msg.id}
+                        onClick={() => {
+                          const ta = textareaRef.current;
+                          const pos = ta?.selectionStart ?? inputValue.length;
+                          const newVal = inputValue.slice(0, pos) + msg.content + inputValue.slice(pos);
+                          setInputValue(newVal);
+                          setShowHistory(false);
+                          requestAnimationFrame(() => {
+                            if (ta) {
+                              ta.focus();
+                              const cursor = pos + msg.content.length;
+                              ta.setSelectionRange(cursor, cursor);
+                            }
+                          });
+                        }}
+                        className="w-full text-left px-3 py-2.5 hover:bg-white/5 transition-colors border-b border-white/5 last:border-b-0 group"
+                      >
+                        <div className="text-sm text-gray-300 group-hover:text-white line-clamp-2">{msg.content}</div>
+                        {msg.timestamp && <div className="text-[11px] text-gray-500 mt-1">{formatRelativeTime(msg.timestamp)}</div>}
+                      </button>
+                    )) : (
+                      <div className="px-3 py-4 text-sm text-gray-500 text-center">暂无消息</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
             <button className="hover:text-gray-200 transition-colors"><Plus size={18} /></button>
             {onDelete && (
               <button
@@ -609,7 +679,50 @@ export function SessionWindow({
             )}
           </div>
           <div className="flex items-center gap-3 text-gray-400">
-            <button className="hover:text-gray-200 transition-colors"><Clock size={18} /></button>
+            <div className="relative" ref={!isTab ? historyRef : undefined}>
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowHistory(!showHistory); }}
+                onMouseDown={(e) => e.stopPropagation()}
+                className={`hover:text-gray-200 transition-colors ${showHistory ? 'text-gray-200' : ''}`}
+                title="最近消息"
+              >
+                <Clock size={18} />
+              </button>
+              {showHistory && (
+                <div className="absolute right-0 top-full mt-2 w-72 bg-[#1E1814]/95 backdrop-blur-2xl border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50">
+                  <div className="px-3 py-2 border-b border-white/5 text-xs font-medium text-gray-500">最近发送的消息</div>
+                  <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                    {recentUserMessages.length > 0 ? recentUserMessages.map(msg => (
+                      <button
+                        key={msg.id}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const ta = textareaRef.current;
+                          const pos = ta?.selectionStart ?? inputValue.length;
+                          const newVal = inputValue.slice(0, pos) + msg.content + inputValue.slice(pos);
+                          setInputValue(newVal);
+                          setShowHistory(false);
+                          requestAnimationFrame(() => {
+                            if (ta) {
+                              ta.focus();
+                              const cursor = pos + msg.content.length;
+                              ta.setSelectionRange(cursor, cursor);
+                            }
+                          });
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        className="w-full text-left px-3 py-2.5 hover:bg-white/5 transition-colors border-b border-white/5 last:border-b-0 group"
+                      >
+                        <div className="text-sm text-gray-300 group-hover:text-white line-clamp-2">{msg.content}</div>
+                        {msg.timestamp && <div className="text-[11px] text-gray-500 mt-1">{formatRelativeTime(msg.timestamp)}</div>}
+                      </button>
+                    )) : (
+                      <div className="px-3 py-4 text-sm text-gray-500 text-center">暂无消息</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
             <button className="hover:text-gray-200 transition-colors"><Plus size={20} /></button>
             {onDelete && (
               <button
@@ -631,6 +744,7 @@ export function SessionWindow({
       {/* Content */}
       <div
         ref={scrollContainerRef}
+        onMouseDown={(e) => e.stopPropagation()}
         className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar ${
           isTab ? 'pt-2 px-6 pb-6'
           : fullScreen ? 'p-8'
@@ -646,15 +760,46 @@ export function SessionWindow({
                 const isMsgStreaming = isStreaming && streamingMessageId === msg.id;
                 return (
                   <div key={msg.id} className={`group/msg flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                    <div className={`${
-                      msg.role === 'user'
-                        ? 'max-w-[85%] bg-white/10 text-gray-200 rounded-[24px] px-5 py-3.5'
-                        : `text-gray-300 w-full${isTab ? ' pl-1' : ''}`
-                    }`}>
+                    <div
+                      onDoubleClick={(e) => {
+                        const target = e.currentTarget;
+                        requestAnimationFrame(() => {
+                          const sel = window.getSelection();
+                          if (sel) {
+                            const range = document.createRange();
+                            range.selectNodeContents(target);
+                            sel.removeAllRanges();
+                            sel.addRange(range);
+                          }
+                        });
+                      }}
+                      className={`msg-content ${
+                        msg.role === 'user'
+                          ? 'group/user relative max-w-[85%] bg-white/10 text-gray-200 rounded-[24px] px-5 py-3.5'
+                          : `text-gray-300 w-full${isTab ? ' pl-1' : ''}`
+                      } cursor-text select-text`}>
                       {msg.role === 'user' ? (
-                        <div className="whitespace-pre-wrap leading-relaxed text-[15px]">
-                          {msg.content}
-                        </div>
+                        <>
+                          <div className="whitespace-pre-wrap leading-relaxed text-[15px]">
+                            {msg.content}
+                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigator.clipboard.writeText(msg.content);
+                              setCopiedMsgId(msg.id);
+                              setTimeout(() => setCopiedMsgId(prev => prev === msg.id ? null : prev), 2000);
+                            }}
+                            className={`absolute -left-9 top-1/2 -translate-y-1/2 p-1.5 rounded-md transition-all cursor-pointer ${
+                              copiedMsgId === msg.id
+                                ? 'text-emerald-400 opacity-100'
+                                : 'text-gray-500 hover:text-gray-200 hover:bg-white/10 opacity-0 group-hover/user:opacity-100'
+                            }`}
+                            title="复制"
+                          >
+                            {copiedMsgId === msg.id ? <Check size={14} /> : <Copy size={14} />}
+                          </button>
+                        </>
                       ) : (
                         <>
                           {isMsgStreaming && !hasVisibleContent(msg) && <ThinkingIndicator />}
@@ -818,7 +963,7 @@ function MessageActions({ message }: { message: Message }) {
         .filter(Boolean)
         .join('\n\n');
     }
-    navigator.clipboard.writeText(text);
+    navigator.clipboard.writeText(text.trim());
     setCopiedId(message.id);
     setTimeout(() => setCopiedId(null), 2000);
   };
