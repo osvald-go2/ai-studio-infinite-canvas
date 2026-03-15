@@ -9,12 +9,12 @@ const MODEL_TO_PLATFORM: Record<string, string> = {
 const MOCK_SKILLS: SkillInfo[] = [
   { name: 'commit', description: 'Create a git commit with AI-generated message', filePath: 'mock', source: 'project' },
   { name: 'review-pr', description: 'Review a pull request for issues and improvements', filePath: 'mock', source: 'project' },
-  { name: 'test-runner', description: 'Run project test suite and analyze failures', filePath: 'mock', source: 'user' },
-  { name: 'refactor', description: 'Refactor selected code for better readability', filePath: 'mock', source: 'user' },
-  { name: 'explain-code', description: 'Explain how a piece of code works', filePath: 'mock', source: 'user' },
+  { name: 'test-runner', description: 'Run project test suite and analyze failures', filePath: 'mock', source: 'user', pluginName: 'superpowers' },
+  { name: 'refactor', description: 'Refactor selected code for better readability', filePath: 'mock', source: 'user', pluginName: 'superpowers' },
+  { name: 'explain-code', description: 'Explain how a piece of code works', filePath: 'mock', source: 'user', pluginName: 'superpowers' },
   { name: 'fix-bug', description: 'Diagnose and fix a bug from error output', filePath: 'mock', source: 'project' },
   { name: 'create-test', description: 'Generate unit tests for a function or module', filePath: 'mock', source: 'project' },
-  { name: 'doc-gen', description: 'Generate documentation for code', filePath: 'mock', source: 'user' },
+  { name: 'polish', description: 'Final quality pass before shipping', filePath: 'mock', source: 'user', pluginName: 'impeccable' },
 ];
 
 function isElectron(): boolean {
