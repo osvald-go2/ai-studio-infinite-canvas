@@ -62,7 +62,7 @@ export function SkillPicker({
             )}
           </div>
           <span className="text-[10px] text-gray-600 ml-auto shrink-0 mt-0.5">
-            {skill.source === 'project' ? 'project' : 'user'}
+            {skill.pluginName || (skill.source === 'project' ? 'project' : 'user')}
           </span>
         </button>
       ))}
