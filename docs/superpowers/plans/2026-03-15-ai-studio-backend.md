@@ -231,7 +231,7 @@ Expected: All 5 tests pass
 - [ ] **Step 4: Commit**
 
 ```bash
-git add ai-backend/src/protocol.rs ai-backend/src/lib.rs
+git add ai-backend/src/protocol.rs
 git commit -m "feat: add NDJSON protocol types with serialization tests"
 ```
 
