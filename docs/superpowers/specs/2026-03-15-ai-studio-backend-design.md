@@ -103,34 +103,84 @@ ai-studio-infinite-canvas/
 
 | Method | Params | Response | Description |
 |--------|--------|----------|-------------|
-| `session.create` | `{model}` | `{session_id}` | Create new session |
-| `session.send` | `{session_id, text}` | `{ok: true}` | Send user message, triggers streaming events |
+| `session.create` | `{model, max_tokens?}` | `{session_id}` | Create new session. Frontend constructs the full `Session` object locally (default position, empty messages, etc.) using only the returned `session_id`. `max_tokens` defaults to `4096` if omitted. |
+| `session.send` | `{session_id, text}` | `{ok: true}` | Send user message. Response is returned **immediately** upon accepting the request, before Claude API streaming begins. Streaming content arrives via subsequent `message.*` events. Rust sidecar maintains the full conversation history internally (see Session State Ownership below). |
 | `session.list` | - | `{sessions: [...]}` | List all active sessions |
 | `session.kill` | `{session_id}` | `{ok: true}` | Kill session |
+| `config.set_api_key` | `{api_key}` | `{ok: true}` | Set or update the Anthropic API key at runtime. Allows key changes without restarting the sidecar. |
 | `ping` | - | `{pong: true}` | Health check |
 
 ### Events (v1)
 
 | Event | Data | Description |
 |-------|------|-------------|
-| `message.delta` | `{session_id, delta: ContentBlock}` | Incremental content block |
-| `message.complete` | `{session_id}` | Message finished |
-| `message.error` | `{session_id, error}` | Streaming error |
-| `session.status` | `{session_id, status}` | Session status change |
+| `block.start` | `{session_id, block_index, block: ContentBlock}` | A new content block started. Contains the initial block shape (e.g., `{type: "text", content: ""}` or `{type: "tool_call", tool: "...", args: "", status: "running"}`). |
+| `block.delta` | `{session_id, block_index, delta}` | Incremental update to the current block. For text/code: `{content: "new chars"}` (append-only). For tool_call: `{args: "json fragment"}` (append to args). |
+| `block.stop` | `{session_id, block_index}` | Current block is complete. |
+| `message.complete` | `{session_id, usage?: {input_tokens, output_tokens}}` | Entire message finished. |
+| `message.error` | `{session_id, error: {code, message}}` | Streaming error. |
+
+Note: Session status (`inbox` / `inprocess` / `review` / `done`) is managed entirely by the frontend. The Rust sidecar does not track or emit status events — these states are UI-level concerns (e.g., user manually moves a session to "review").
+
+### Session State Ownership
+
+The Rust sidecar is the **source of truth** for conversation history. Each `Session` in the `SessionManager` maintains a `Vec<Message>` that accumulates the conversation:
+
+- `session.create` → initializes an empty message list
+- `session.send` → appends the user message to history, sends the full `messages` array to Claude API, then appends the assistant response as it streams
+- The frontend also keeps `Session.messages` for rendering, but these are populated from `block.*` events. On sidecar crash, the frontend's copy serves as the last-known state (see Crash Recovery).
+
+### Streaming Semantics
+
+All `block.delta` events carry **incremental, append-only** content:
+
+- **text block**: `delta.content` contains only the new characters to append (not the full accumulated text)
+- **code block**: `delta.content` contains new code characters to append
+- **tool_call block**: `delta.args` contains new JSON fragment to append to args string
+- **Other block types** (todolist, subagent, askuser, skill): sent as a single `block.start` with the complete block data, no subsequent deltas (these are derived from tool_use inputs which arrive as a complete JSON object after streaming)
 
 ## Content Block Types
 
-The normalizer converts Claude API raw output into 7 frontend ContentBlock types:
+The normalizer converts Claude API raw output into 7 frontend ContentBlock types.
+
+### ContentBlock Schema
+
+Each variant matches the frontend `ContentBlock` discriminated union in `src/types.ts`:
+
+```typescript
+// 1. Text
+{ type: "text", content: string }
+
+// 2. Code (extracted from markdown code fences in text)
+{ type: "code", code: string, language: string }
+
+// 3. Tool call
+{ type: "tool_call", tool: string, args: string, description?: string, duration?: number, status: "running" | "done" | "error" }
+
+// 4. Todo list (from TodoWrite/TaskCreate tool_use)
+{ type: "todolist", items: [{ id: string, label: string, status: "pending" | "in_progress" | "done" }] }
+
+// 5. Subagent (from Agent tool_use)
+{ type: "subagent", agentId: string, task: string, status: "launched" | "working" | "done" | "error", summary?: string, blocks?: ContentBlock[] }
+
+// 6. Ask user (from AskUserQuestion tool_use)
+{ type: "askuser", questions: [{ id: string, question: string, options?: string[], response?: string }], submitted?: boolean }
+
+// 7. Skill (from Skill tool_use)
+{ type: "skill", skill: string, args?: string, status: "invoking" | "done", duration?: number }
+```
+
+### Identification Rules
 
 | Type | Source | Identification Rule |
 |------|--------|-------------------|
-| `text` | Claude text content | Plain text output |
+| `text` | Claude text content | Plain text output (outside code fences) |
 | `code` | Claude text content | Markdown code blocks (``` wrapped), split into separate blocks |
-| `tool_call` | Claude `tool_use` content block | `content_block_start` with type=tool_use |
-| `todolist` | tool_use calling TodoWrite/TaskCreate | Parse tool name + extract items from input |
-| `subagent` | tool_use calling Agent | Extract agentId, task, status from input |
-| `askuser` | tool_use calling AskUserQuestion | Extract questions from input |
-| `skill` | tool_use calling Skill | Extract skill name + status from input |
+| `tool_call` | Claude `tool_use` content block | `content_block_start` with type=tool_use (generic, not matching special tools below) |
+| `todolist` | tool_use calling TodoWrite/TaskCreate | Match tool name, parse `items` from input JSON |
+| `subagent` | tool_use calling Agent | Match tool name, extract `agentId`, `task`, `status` from input |
+| `askuser` | tool_use calling AskUserQuestion | Match tool name, extract `questions` from input |
+| `skill` | tool_use calling Skill | Match tool name, extract `skill`, `args` from input |
 
 ### Normalizer Pipeline
 
@@ -155,9 +205,11 @@ Claude SSE stream → stream.rs (raw events)
 
 ### SessionManager
 - `HashMap<String, Session>` for active sessions
-- `create()` → generate UUID, insert into map
-- `send()` → call Claude API with streaming, spawn tokio task to read SSE, push events via mpsc
+- Each `Session` holds: `id`, `model`, `max_tokens`, `messages: Vec<Message>` (full conversation history), `active_task: Option<JoinHandle>`
+- `create()` → generate UUID, initialize empty messages vec, insert into map
+- `send()` → append user message to `session.messages`, call Claude API with full `messages` array and `stream: true`, spawn tokio task to read SSE and push events via mpsc, append assistant message to history on completion
 - `kill()` → abort task handle, remove session
+- `set_api_key()` → update stored API key for subsequent requests
 
 ### Claude Client
 - `reqwest` with `stream` feature
@@ -235,17 +287,30 @@ Complete flow for a user sending a message:
 ## API Key Management
 
 - User enters `ANTHROPIC_API_KEY` in frontend settings
-- Stored via Electron `electron-store` or system keychain
-- Main process injects as environment variable when spawning sidecar
-- Rust reads via `std::env::var("ANTHROPIC_API_KEY")`
+- Stored via Electron `electron-store` (persisted to disk, encrypted at rest)
+- On app start: if a stored key exists, main process passes it as env var when spawning sidecar
+- If no key is stored at startup: sidecar starts without a key. Any `session.send` will fail with `message.error` (code 401) prompting the user to enter a key
+- When user sets/updates the key: frontend calls `config.set_api_key` via the protocol. Rust sidecar updates its in-memory key immediately (no restart needed). Main process also persists the key to `electron-store` for next launch
+- Rust reads the key from: env var at startup OR `config.set_api_key` at runtime (runtime value takes precedence)
 
 ## Error Handling
 
 | Scenario | Behavior |
 |----------|----------|
-| Claude API 401 | `message.error` event → frontend prompts invalid key |
-| Network disconnected | `message.error` event → frontend prompts retry |
-| Rust sidecar crash | Main process detects exit → auto-restart + notify frontend |
+| Claude API 401 | `message.error` event (code 401) → frontend prompts invalid key |
+| Network disconnected | `message.error` event (code 503) → frontend prompts retry |
+| No API key configured | `message.error` event (code 401) → frontend prompts to enter key |
+| Rust sidecar crash | See Crash Recovery below |
+
+## Crash Recovery
+
+When the Rust sidecar crashes:
+
+1. **Detection**: Main process (`sidecar.ts`) detects the child process exit via the `close` event
+2. **Auto-restart**: Main process spawns a new sidecar instance (with the stored API key re-injected)
+3. **Frontend notification**: Main process emits a `sidecar.restarted` event to the renderer
+4. **State reconciliation**: The frontend treats this as a soft reset — all sessions remain in the frontend's state (with their full message history), but their backend counterparts no longer exist. The frontend does NOT auto-re-create sessions on the backend. When the user next sends a message in a session, the frontend calls `session.create` to re-register it, then replays the existing message history via a single `session.send` that includes all prior messages in the `text` param (or a dedicated `session.restore` method if needed in a future version)
+5. **User impact**: Minimal — the user sees a transient "reconnecting" indicator, then can continue conversations
 
 ## Out of Scope (v1)
 
