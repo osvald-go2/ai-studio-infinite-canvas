@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Session, SessionStatus } from '../types';
-import { MessageSquare, MoreHorizontal, Circle, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
+import { MessageSquare, MoreHorizontal, Circle, ZoomIn, ZoomOut, Maximize, GitBranch, GitFork, Trash2 } from 'lucide-react';
 import { SessionWindow } from './SessionWindow';
 
 const COLUMNS: { 
@@ -21,18 +21,17 @@ const COLUMNS: {
 export function BoardView({
   sessions,
   setSessions,
-  onOpenReview,
   focusedSessionId,
   projectDir,
 }: {
   sessions: Session[],
   setSessions: any,
-  onOpenReview: (id: string) => void,
   focusedSessionId?: string | null,
   projectDir?: string | null,
 }) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [displaySession, setDisplaySession] = useState<Session | null>(null);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
 
   // Keep displaySession around for the exit animation
   useEffect(() => {
@@ -45,6 +44,14 @@ export function BoardView({
       return () => clearTimeout(timer);
     }
   }, [activeSessionId, sessions]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!menuOpenId) return;
+    const handleClick = () => setMenuOpenId(null);
+    window.addEventListener('click', handleClick);
+    return () => window.removeEventListener('click', handleClick);
+  }, [menuOpenId]);
 
   // Zoom & Pan state
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
@@ -134,7 +141,7 @@ export function BoardView({
     e.preventDefault();
     const sessionId = e.dataTransfer.getData('sessionId');
     if (sessionId) {
-      setSessions(sessions.map(s => s.id === sessionId ? { ...s, status } : s));
+      setSessions((prev: Session[]) => prev.map(s => s.id === sessionId ? { ...s, status } : s));
     }
   };
 
@@ -189,9 +196,48 @@ export function BoardView({
                     className={`bg-white/5 ${col.cardBgHover} border border-white/5 border-t-2 ${col.cardBorder} ${activeSessionId === session.id ? 'ring-2 ring-blue-500/50 bg-white/10 shadow-blue-500/20' : ''} ${focusedSessionId === session.id ? 'animate-pulse' : ''} rounded-2xl p-4 cursor-pointer transition-all shadow-lg backdrop-blur-md`}
                   >
                     <div className="flex justify-between items-start mb-2">
-                      <h4 className="font-medium text-gray-100">{session.title}</h4>
-                      <button className="text-gray-500 hover:text-gray-300"><MoreHorizontal size={16} /></button>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <h4 className="font-medium text-gray-100 truncate">{session.title}</h4>
+                        {session.worktree && session.worktree !== 'default' && (
+                          <GitFork size={12} className="text-amber-400 shrink-0" />
+                        )}
+                      </div>
+                      <div className="relative shrink-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === session.id ? null : session.id); }}
+                          className="text-gray-500 hover:text-gray-300"
+                        >
+                          <MoreHorizontal size={16} />
+                        </button>
+                        {menuOpenId === session.id && (
+                          <div
+                            className="absolute right-0 top-full mt-1 w-36 bg-[#2A2520] border border-white/10 rounded-lg shadow-xl z-50 py-1"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setMenuOpenId(null);
+                                if (window.confirm('确定要删除这个 session 吗？')) {
+                                  if (activeSessionId === session.id) setActiveSessionId(null);
+                                  setSessions((prev: Session[]) => prev.filter(s => s.id !== session.id));
+                                }
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-white/5 transition-colors"
+                            >
+                              <Trash2 size={14} />
+                              <span>删除</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
+                    {session.gitBranch && session.gitBranch !== 'main' && (
+                      <div className="flex items-center gap-1 mb-2">
+                        <GitBranch size={11} className="text-orange-400" />
+                        <span className="text-[11px] font-mono text-orange-300 truncate">{session.gitBranch}</span>
+                      </div>
+                    )}
                     <p className="text-xs text-gray-400 line-clamp-2 mb-4">
                       {session.messages[session.messages.length - 1]?.content || 'No messages yet.'}
                     </p>
@@ -241,7 +287,11 @@ export function BoardView({
                session={displaySession}
                onUpdate={(updated) => setSessions((prev: Session[]) => prev.map(s => s.id === updated.id ? updated : s))}
                onClose={() => setActiveSessionId(null)}
-               onOpenReview={() => onOpenReview(displaySession.id)}
+               onDelete={() => {
+                 const id = displaySession.id;
+                 setActiveSessionId(null);
+                 setSessions((prev: Session[]) => prev.filter(s => s.id !== id));
+               }}
                fullScreen={true}
                projectDir={projectDir}
              />

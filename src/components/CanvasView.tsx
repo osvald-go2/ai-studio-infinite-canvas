@@ -7,7 +7,6 @@ import { SESSION_WIDTH, SESSION_DEFAULT_HEIGHT, SESSION_MIN_HEIGHT } from '@/con
 export function CanvasView({
   sessions,
   setSessions,
-  onOpenReview,
   focusedSessionId,
   projectDir,
   transform,
@@ -16,7 +15,6 @@ export function CanvasView({
 }: {
   sessions: Session[],
   setSessions: any,
-  onOpenReview: (id: string) => void,
   focusedSessionId?: string | null,
   projectDir?: string | null,
   transform: { x: number; y: number; scale: number },
@@ -29,7 +27,7 @@ export function CanvasView({
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Tool and Selection State
-  const [toolMode, setToolMode] = useState<'hand' | 'select'>('hand');
+  const [toolMode, setToolMode] = useState<'hand' | 'select'>('select');
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const [selectionBox, setSelectionBox] = useState<{ startX: number, startY: number, currentX: number, currentY: number } | null>(null);
   const [broadcastMessage, setBroadcastMessage] = useState('');
@@ -214,7 +212,8 @@ export function CanvasView({
               id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9),
               role: 'user',
               content: broadcastMessage,
-              type: 'text'
+              type: 'text',
+              timestamp: Date.now()
             }
           ]
         };
@@ -265,7 +264,7 @@ export function CanvasView({
             updateSession={(updated) => {
               setSessions((prev: Session[]) => prev.map(s => s.id === updated.id ? updated : s));
             }}
-            onOpenReview={() => onOpenReview(session.id)}
+            onDelete={() => setSessions((prev: Session[]) => prev.filter(s => s.id !== session.id))}
             projectDir={projectDir}
           />
         ))}
@@ -289,19 +288,19 @@ export function CanvasView({
         className="absolute top-6 left-6 flex flex-col gap-2 bg-black/40 backdrop-blur-md p-1.5 rounded-xl border border-white/10 z-50 ui-overlay"
         onMouseDown={e => e.stopPropagation()}
       >
-        <button 
-          onClick={() => setToolMode('hand')} 
-          className={`p-2 rounded-lg transition-colors ${toolMode === 'hand' ? 'bg-blue-500/50 text-white' : 'text-gray-400 hover:bg-white/10 hover:text-gray-200'}`}
-          title="Pan Tool"
-        >
-          <Hand size={20} />
-        </button>
-        <button 
-          onClick={() => setToolMode('select')} 
+        <button
+          onClick={() => setToolMode('select')}
           className={`p-2 rounded-lg transition-colors ${toolMode === 'select' ? 'bg-blue-500/50 text-white' : 'text-gray-400 hover:bg-white/10 hover:text-gray-200'}`}
           title="Select Tool"
         >
           <MousePointer2 size={20} />
+        </button>
+        <button
+          onClick={() => setToolMode('hand')}
+          className={`p-2 rounded-lg transition-colors ${toolMode === 'hand' ? 'bg-blue-500/50 text-white' : 'text-gray-400 hover:bg-white/10 hover:text-gray-200'}`}
+          title="Pan Tool"
+        >
+          <Hand size={20} />
         </button>
       </div>
 
@@ -624,7 +623,7 @@ function DraggableSession({
   onGroupDragMove,
   onSelect,
   updateSession,
-  onOpenReview,
+  onDelete,
   projectDir,
 }: {
   session: Session,
@@ -637,7 +636,7 @@ function DraggableSession({
   onGroupDragMove: (dx: number, dy: number) => void,
   onSelect?: (multi: boolean) => void,
   updateSession: (s: Session) => void,
-  onOpenReview: () => void,
+  onDelete: () => void,
   projectDir?: string | null,
 }) {
   const [isDragging, setIsDragging] = useState(false);
@@ -656,7 +655,7 @@ function DraggableSession({
   const handleMouseDown = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     const isHeader = !!target.closest('.session-header');
-    const isHandModeDrag = toolMode === 'hand' && !target.closest('button, input, textarea, a, select, [contenteditable]');
+    const isHandModeDrag = toolMode === 'hand' && !target.closest('button, input, textarea, a, select, [contenteditable], .msg-content');
     const canDrag = isHeader || isHandModeDrag;
 
     if (canDrag) {
@@ -783,7 +782,7 @@ function DraggableSession({
       <SessionWindow
         session={session}
         onUpdate={updateSession}
-        onOpenReview={onOpenReview}
+        onDelete={onDelete}
         height={currentHeight}
         animateHeight={animateHeight}
         onHeaderDoubleClick={handleHeaderDoubleClick}

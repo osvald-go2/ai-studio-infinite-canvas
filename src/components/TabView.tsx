@@ -1,24 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import { Session } from '../types';
 import { SessionWindow } from './SessionWindow';
-import { MessageSquare, GitBranch, FolderGit2, Search } from 'lucide-react';
+import { MessageSquare, GitBranch, FolderGit2, Search, MoreHorizontal, Trash2 } from 'lucide-react';
 import { STATUS_COLORS } from '../utils/statusColors';
 
 export function TabView({
   sessions,
   setSessions,
-  onOpenReview,
   focusedSessionId,
   projectDir,
 }: {
   sessions: Session[],
   setSessions: any,
-  onOpenReview: (id: string) => void,
   focusedSessionId?: string | null,
   projectDir?: string | null,
 }) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(sessions[0]?.id || null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!menuOpenId) return;
+    const handleClick = () => setMenuOpenId(null);
+    window.addEventListener('click', handleClick);
+    return () => window.removeEventListener('click', handleClick);
+  }, [menuOpenId]);
 
   // Handle focusing on a specific session from global search
   useEffect(() => {
@@ -66,11 +73,47 @@ export function TabView({
                 <span className="text-sm text-white truncate">
                   {session.title}
                 </span>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full uppercase font-semibold shrink-0 tracking-wide ${
-                  STATUS_COLORS[session.status].badgeBg} ${STATUS_COLORS[session.status].badgeText
-                }`}>
-                  {session.status === 'inprocess' ? 'IN PROCESS' : session.status}
-                </span>
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full uppercase font-semibold tracking-wide ${
+                    STATUS_COLORS[session.status].badgeBg} ${STATUS_COLORS[session.status].badgeText
+                  }`}>
+                    {session.status === 'inprocess' ? 'IN PROCESS' : session.status}
+                  </span>
+                  <div className="relative">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === session.id ? null : session.id); }}
+                      className="p-0.5 rounded text-gray-500 hover:text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <MoreHorizontal size={14} />
+                    </button>
+                    {menuOpenId === session.id && (
+                      <div
+                        className="absolute right-0 top-full mt-1 w-36 bg-[#2A2520] border border-white/10 rounded-lg shadow-xl z-50 py-1"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMenuOpenId(null);
+                            if (window.confirm('确定要删除这个 session 吗？')) {
+                              const id = session.id;
+                              if (activeSessionId === id) {
+                                const idx = sessions.findIndex(s => s.id === id);
+                                const next = sessions[idx + 1] ?? sessions[idx - 1] ?? null;
+                                setActiveSessionId(next?.id ?? null);
+                              }
+                              setSessions((prev: Session[]) => prev.filter(s => s.id !== id));
+                            }
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-white/5 transition-colors"
+                        >
+                          <Trash2 size={14} />
+                          <span>删除</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {activeSessionId === session.id && (
@@ -104,8 +147,14 @@ export function TabView({
             onUpdate={(updated) => {
               setSessions((prev: Session[]) => prev.map(s => s.id === updated.id ? updated : s));
             }}
-            onOpenReview={() => onOpenReview(activeSession.id)}
             onClose={() => setActiveSessionId(null)}
+            onDelete={() => {
+              const id = activeSession.id;
+              const idx = sessions.findIndex(s => s.id === id);
+              const next = sessions[idx + 1] ?? sessions[idx - 1] ?? null;
+              setActiveSessionId(next?.id ?? null);
+              setSessions((prev: Session[]) => prev.filter(s => s.id !== id));
+            }}
             fullScreen={true}
             variant="tab"
             projectDir={projectDir}

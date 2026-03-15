@@ -1,19 +1,5 @@
 export type SessionStatus = 'inbox' | 'inprocess' | 'review' | 'done';
 
-export interface FileDiff {
-  filename: string;
-  status: 'M' | 'A' | 'D';
-  additions: number;
-  deletions: number;
-  patch: string;
-}
-
-export interface GitDiff {
-  totalAdditions: number;
-  totalDeletions: number;
-  files: FileDiff[];
-}
-
 export type ContentBlock =
   | { type: 'text'; content: string }
   | { type: 'code'; code: string; language: string }
@@ -56,6 +42,7 @@ export interface Message {
   content: string;
   type?: 'text' | 'input_required' | 'code';
   blocks?: ContentBlock[];
+  timestamp?: number;
 }
 
 export interface Session {
@@ -67,7 +54,6 @@ export interface Session {
   status: SessionStatus;
   position: { x: number; y: number };
   messages: Message[];
-  diff?: GitDiff | null;
   hasChanges?: boolean;
   changeCount?: number;
   height?: number;
