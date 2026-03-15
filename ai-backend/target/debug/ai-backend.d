@@ -1,0 +1,1 @@
+/Users/lion268li/repos/toutiao/demo/ai-studio-infinite-canvas/.claude/worktrees/mumu/ai-backend/target/debug/ai-backend: /Users/lion268li/repos/toutiao/demo/ai-studio-infinite-canvas/.claude/worktrees/mumu/ai-backend/src/main.rs
