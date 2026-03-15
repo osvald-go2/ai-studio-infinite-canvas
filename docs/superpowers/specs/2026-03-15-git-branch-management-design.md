@@ -39,7 +39,7 @@ ai-backend/src/
 | `git.stage_file` | `{dir, file}` | `{}` | `git add <file>` |
 | `git.unstage_file` | `{dir, file}` | `{}` | `git reset HEAD -- <file>` |
 | `git.discard_file` | `{dir, file}` | `{}` | `git checkout -- <file>` (tracked) 或 `rm` (untracked) |
-| `git.commit` | `{dir, message}` | `{hash}` | `git add -A && git commit`（和 MuMu 一致，stage all） |
+| `git.commit` | `{dir, message}` | `{hash}` | `git add -A && git commit`（v1 总是 stage all，和 MuMu 一致；`stage_file`/`unstage_file` 为未来增量提交预留） |
 | `git.branches` | `{dir}` | `BranchInfo[]` | 所有分支列表 |
 | `git.log` | `{dir, count}` | `CommitInfo[]` | commit 历史 |
 | `git.worktrees` | `{dir}` | `WorktreeInfo[]` | worktree 列表 |
@@ -128,7 +128,7 @@ struct BranchDiffStats {
 
 所有 git 操作通过 `std::process::Command` 执行 shell 命令，解析输出。主要命令：
 
-- `git.info` → `git rev-parse --abbrev-ref HEAD` + `git log -1 --format=%H%n%s` + `git rev-list --left-right --count HEAD...@{upstream}`
+- `git.info` → `git rev-parse --abbrev-ref HEAD` + `git log -1 --format=%H%n%s` + `git rev-list --left-right --count HEAD...@{upstream}`（如果 `@{upstream}` 失败则设 `has_upstream: false, ahead: 0, behind: 0`）
 - `git.changes` → `git status --porcelain` + 逐文件 `git diff --numstat`
 - `git.diff` → `git diff <file>`，解析为结构化 DiffHunk/DiffLine
 - `git.unstage_file` → `git reset HEAD -- <file>`
@@ -214,6 +214,8 @@ export const git = {
   mergeWorktree(dir: string, wtPath: string, target: string): Promise<string>,
   removeWorktree(dir: string, wtPath: string, branch: string): Promise<void>,
   branchDiffStats(dir: string, baseBranch: string): Promise<BranchDiffStats>,
+  unstageFile(dir: string, file: string): Promise<void>,
+  discardFile(dir: string, file: string): Promise<void>,
   generateCommitMsg(dir: string, diffText: string): void,
 }
 ```
@@ -294,11 +296,14 @@ src/components/git/
 ### 4.1 SessionWindow Review 按钮
 
 - AI 响应完成后（`onMessageComplete` 事件）→ 调用 `git.changes(workingDir)` 获取真实变更
-- 有变更：在 session 上设置 `hasChanges: true` + `changeCount: number`，显示 review 按钮
+- 有变更：设置 `session.hasChanges = true`，`session.changeCount = fileCount`，status → `review`，显示 review 按钮
 - 无变更：不显示，保持 `inprocess`
 - 点击打开 GitReviewPanel
+- 渲染条件：`session.status === 'review' && session.hasChanges`（替代原来的 `session.diff && totalAdditions > 0`）
 
-**触发时机**：Review 按钮的状态由 `session.hasChanges` 驱动（替代原来的 `session.diff`），每次 AI 消息完成时刷新。
+**触发时机**：Review 按钮的状态由 `session.hasChanges` 驱动，每次 AI 消息完成时刷新。
+
+**commit/discard 处理**：commit 或 discard 成功后，设 `session.hasChanges = false, changeCount = 0`，此逻辑从 App.tsx 移入 CommitSection/GitPanel 组件。
 
 ### 4.2 GitReviewPanel 数据源
 
@@ -307,14 +312,6 @@ src/components/git/
 - 点击文件 → `git.diff(workingDir, file)` 获取 hunk 数据
 - **`Session.diff` 字段移除**，替换为 `hasChanges: boolean` + `changeCount: number`（轻量标记）
 - 每次打开面板时实时获取完整数据
-
-### 4.5 刷新策略
-
-v1 采用手动/事件驱动刷新（不做文件监听）：
-- AI 消息完成后自动刷新 changes
-- commit 成功后自动刷新 changes + log
-- worktree 创建/删除后自动刷新 worktrees + branches
-- GitPanel 提供手动 refresh 按钮
 
 ### 4.3 NewSessionModal Worktree 支持
 
@@ -328,6 +325,14 @@ v1 采用手动/事件驱动刷新（不做文件监听）：
 
 - MergeDialog：选择目标分支 + 可选"合并后删除" + `git.mergeWorktree`
 - DiscardDialog：确认警告 + `git.removeWorktree`
+
+### 4.5 刷新策略
+
+v1 采用手动/事件驱动刷新（不做文件监听）：
+- AI 消息完成后自动刷新 changes
+- commit 成功后自动刷新 changes + log
+- worktree 创建/删除后自动刷新 worktrees + branches
+- GitPanel 提供手动 refresh 按钮
 
 ---
 
