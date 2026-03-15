@@ -1,6 +1,7 @@
 use serde_json::json;
 use tokio::sync::mpsc;
 
+use crate::db::{self, Database};
 use crate::protocol::{ErrorResponse, OutgoingMessage, Request, Response};
 use crate::session::manager::SessionManager;
 use crate::git::{commands as git_cmd, worktree as git_wt};
@@ -9,6 +10,7 @@ pub async fn handle_request(
     req: Request,
     session_manager: &mut SessionManager,
     event_tx: mpsc::UnboundedSender<OutgoingMessage>,
+    database: &Database,
 ) -> OutgoingMessage {
     match req.method.as_str() {
         "ping" => Response::ok(req.id, json!({"pong": true})),

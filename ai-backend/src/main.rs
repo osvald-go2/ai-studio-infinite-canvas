@@ -22,6 +22,10 @@ async fn main() {
         session_manager.set_api_key(key);
     }
 
+    let database = db::Database::open_default()
+        .expect("failed to initialize database");
+    eprintln!("[ai-backend] database initialized");
+
     // Channel for streaming events (written to stdout)
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<OutgoingMessage>();
 
@@ -74,7 +78,7 @@ async fn main() {
             }
         };
 
-        let result = router::handle_request(req, &mut session_manager, event_tx.clone()).await;
+        let result = router::handle_request(req, &mut session_manager, event_tx.clone(), &database).await;
         if let Ok(json) = serde_json::to_string(&result) {
             let _ = out_tx.send(json);
         }
