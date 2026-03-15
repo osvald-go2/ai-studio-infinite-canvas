@@ -11,6 +11,7 @@ import { TopBar } from './components/TopBar';
 import { NewSessionModal } from './components/NewSessionModal';
 import { GitReviewPanel } from './components/git/GitReviewPanel';
 import { GitPanel } from './components/git/GitPanel';
+import { GitProvider } from './contexts/GitProvider';
 import { Session, SessionStatus, DbProject, DbSession } from './types';
 import { backend } from './services/backend';
 import { gitService } from './services/git';
@@ -21,32 +22,67 @@ function findNextGridPosition(
   sessions: Session[],
   viewportWidth: number
 ): { x: number; y: number } {
-  const cellW = SESSION_WIDTH + SESSION_GAP;
-  const cellH = SESSION_DEFAULT_HEIGHT + SESSION_GAP;
-  const cols = Math.max(1, Math.floor(viewportWidth / cellW));
-  const maxAttempts = 100;
+  if (sessions.length === 0) return { x: 0, y: 0 };
 
-  for (let index = 0; index < maxAttempts; index++) {
-    const x = (index % cols) * cellW;
-    const y = Math.floor(index / cols) * cellH;
+  const gap = SESSION_GAP;
+  const w = SESSION_WIDTH;
+  const h = SESSION_DEFAULT_HEIGHT;
 
-    const hasCollision = sessions.some(s => {
-      const eLeft = s.position.x - SESSION_GAP;
-      const eRight = s.position.x + SESSION_WIDTH + SESSION_GAP;
-      const eTop = s.position.y - SESSION_GAP;
-      const eBottom = s.position.y + (s.height ?? SESSION_DEFAULT_HEIGHT) + SESSION_GAP;
-
-      return x < eRight && x + SESSION_WIDTH > eLeft && y < eBottom && y + SESSION_DEFAULT_HEIGHT > eTop;
+  const hasAnyCollision = (nx: number, ny: number): boolean =>
+    sessions.some(s => {
+      const eLeft = s.position.x - gap;
+      const eRight = s.position.x + w + gap;
+      const eTop = s.position.y - gap;
+      const eBottom = s.position.y + (s.height ?? h) + gap;
+      return nx < eRight && nx + w > eLeft && ny < eBottom && ny + h > eTop;
     });
 
-    if (!hasCollision) {
-      return { x, y };
+  // Group sessions into visual rows by vertical overlap
+  const sorted = [...sessions].sort(
+    (a, b) => a.position.y - b.position.y || a.position.x - b.position.x
+  );
+  const rows: Session[][] = [];
+  for (const s of sorted) {
+    const sTop = s.position.y;
+    const sBottom = s.position.y + (s.height ?? h);
+    let placed = false;
+    for (const row of rows) {
+      const rowTop = Math.min(...row.map(r => r.position.y));
+      const rowBottom = Math.max(...row.map(r => r.position.y + (r.height ?? h)));
+      if (sTop < rowBottom && sBottom > rowTop) {
+        row.push(s);
+        placed = true;
+        break;
+      }
     }
+    if (!placed) rows.push([s]);
+  }
+  rows.sort((a, b) =>
+    Math.min(...a.map(s => s.position.y)) - Math.min(...b.map(s => s.position.y))
+  );
+
+  // Attempt 1: right of rightmost session in last row
+  const lastRow = rows[rows.length - 1];
+  const rightmost = lastRow.reduce((best, s) =>
+    s.position.x > best.position.x ? s : best
+  );
+  const candX1 = rightmost.position.x + w + gap;
+  const candY1 = rightmost.position.y;
+  if (candX1 + w <= viewportWidth && !hasAnyCollision(candX1, candY1)) {
+    return { x: candX1, y: candY1 };
   }
 
-  // Fallback: place after the rightmost session
-  const maxX = sessions.reduce((max, s) => Math.max(max, s.position.x + SESSION_WIDTH), 0);
-  return { x: maxX + SESSION_GAP, y: 0 };
+  // Attempt 2: new row below all sessions, aligned with first-row left edge
+  const lastRowMinY = Math.min(...lastRow.map(s => s.position.y));
+  const candX2 = Math.max(0, Math.min(...rows[0].map(s => s.position.x)));
+  const candY2 = lastRowMinY + h + gap;
+  if (!hasAnyCollision(candX2, candY2)) {
+    return { x: candX2, y: candY2 };
+  }
+
+  // Fallback: right of everything at y=0
+  const maxX = sessions.reduce((max, s) => Math.max(max, s.position.x + w), 0);
+  return { x: maxX + gap, y: 0 };
 }
 
 export default function App() {
@@ -272,7 +308,8 @@ export default function App() {
           id: Date.now().toString() + '-init',
           role: 'user',
           content: initialPrompt.trim(),
-          type: 'text'
+          type: 'text',
+          timestamp: Date.now()
         }] : []
       };
       return [...prev, newSession];
@@ -360,66 +397,68 @@ export default function App() {
         isSwitchingProject={isSwitchingProject}
       />
 
-      <div className="flex-1 min-h-0 relative z-10 flex overflow-hidden">
-        <div className="flex-1 min-w-0 min-h-0">
-          {viewMode === 'canvas' ? (
-            <CanvasView
-              sessions={sessions}
-              setSessions={setSessions}
-              onOpenReview={(sessionId) => setReviewSessionId(sessionId)}
-              focusedSessionId={focusedSessionId}
+      <GitProvider projectDir={projectDir}>
+        <div className="flex-1 min-h-0 relative z-10 flex overflow-hidden">
+          <div className="flex-1 min-w-0 min-h-0">
+            {viewMode === 'canvas' ? (
+              <CanvasView
+                sessions={sessions}
+                setSessions={setSessions}
+                onOpenReview={(sessionId) => setReviewSessionId(sessionId)}
+                focusedSessionId={focusedSessionId}
+                projectDir={projectDir}
+                transform={canvasTransform}
+                onTransformChange={setCanvasTransform}
+                onCanvasResize={(w) => { canvasWidthRef.current = w; }}
+              />
+            ) : viewMode === 'board' ? (
+              <BoardView
+                sessions={sessions}
+                setSessions={setSessions}
+                onOpenReview={(sessionId) => setReviewSessionId(sessionId)}
+                focusedSessionId={focusedSessionId}
+                projectDir={projectDir}
+              />
+            ) : (
+              <TabView
+                sessions={sessions}
+                setSessions={setSessions}
+                onOpenReview={(sessionId) => setReviewSessionId(sessionId)}
+                focusedSessionId={focusedSessionId}
+                projectDir={projectDir}
+              />
+            )}
+          </div>
+
+          {/* Git Panel — side panel */}
+          {projectDir && (
+            <GitPanel
+              isOpen={showGitPanel}
+              onClose={() => setShowGitPanel(false)}
               projectDir={projectDir}
-              transform={canvasTransform}
-              onTransformChange={setCanvasTransform}
-              onCanvasResize={(w) => { canvasWidthRef.current = w; }}
-            />
-          ) : viewMode === 'board' ? (
-            <BoardView
               sessions={sessions}
-              setSessions={setSessions}
-              onOpenReview={(sessionId) => setReviewSessionId(sessionId)}
               focusedSessionId={focusedSessionId}
-              projectDir={projectDir}
-            />
-          ) : (
-            <TabView
-              sessions={sessions}
-              setSessions={setSessions}
-              onOpenReview={(sessionId) => setReviewSessionId(sessionId)}
-              focusedSessionId={focusedSessionId}
-              projectDir={projectDir}
+              onSessionUpdate={handleSessionUpdate}
             />
           )}
         </div>
 
-        {/* Git Panel — side panel */}
-        {projectDir && (
-          <GitPanel
-            isOpen={showGitPanel}
-            onClose={() => setShowGitPanel(false)}
-            projectDir={projectDir}
-            sessions={sessions}
-            focusedSessionId={focusedSessionId}
-            onSessionUpdate={handleSessionUpdate}
-          />
-        )}
-      </div>
+        <NewSessionModal
+          isOpen={isNewModalOpen}
+          onClose={() => setIsNewModalOpen(false)}
+          onCreate={handleCreateSession}
+          projectDir={projectDir}
+          isGitRepo={isGitRepo}
+        />
 
-      <NewSessionModal
-        isOpen={isNewModalOpen}
-        onClose={() => setIsNewModalOpen(false)}
-        onCreate={handleCreateSession}
-        projectDir={projectDir}
-        isGitRepo={isGitRepo}
-      />
-
-      <GitReviewPanel
-        isOpen={!!reviewSessionId}
-        session={reviewSession}
-        onClose={() => setReviewSessionId(null)}
-        onCommit={handleCommit}
-        onDiscard={handleDiscard}
-      />
+        <GitReviewPanel
+          isOpen={!!reviewSessionId}
+          session={reviewSession}
+          onClose={() => setReviewSessionId(null)}
+          onCommit={handleCommit}
+          onDiscard={handleDiscard}
+        />
+      </GitProvider>
     </div>
   );
 }
