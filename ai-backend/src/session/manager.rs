@@ -100,14 +100,24 @@ impl SessionManager {
         &mut self,
         session_id: &str,
         text: &str,
-        _event_tx: mpsc::UnboundedSender<OutgoingMessage>,
+        event_tx: mpsc::UnboundedSender<OutgoingMessage>,
     ) -> Result<(), SessionError> {
-        let inner = self.inner.lock().unwrap();
-        let _session = inner.sessions.get(session_id)
-            .ok_or_else(|| SessionError::NotFound(session_id.to_string()))?;
-        let _api_key = inner.api_key.clone()
-            .ok_or(SessionError::NoApiKey)?;
-        drop(inner);
+        let (api_key, model, max_tokens, mut api_messages) = {
+            let inner = self.inner.lock().unwrap();
+            let session = inner.sessions.get(session_id)
+                .ok_or_else(|| SessionError::NotFound(session_id.to_string()))?;
+            let api_key = inner.api_key.clone()
+                .ok_or(SessionError::NoApiKey)?;
+
+            let api_messages: Vec<crate::claude::types::ApiMessage> = session.messages.iter()
+                .map(|m| crate::claude::types::ApiMessage {
+                    role: m.role.clone(),
+                    content: m.content.clone(),
+                })
+                .collect();
+
+            (api_key, session.model.clone(), session.max_tokens, api_messages)
+        };
 
         // Append user message
         {
@@ -119,7 +129,70 @@ impl SessionManager {
             });
         }
 
-        // TODO: Call Claude API and stream response (Task 10)
+        // Add user message to API request
+        api_messages.push(crate::claude::types::ApiMessage {
+            role: "user".into(),
+            content: text.to_string(),
+        });
+
+        let sid = session_id.to_string();
+        let inner_ref = self.inner.clone();
+
+        // Spawn streaming task
+        tokio::spawn(async move {
+            let client = crate::claude::client::ClaudeClient::new(api_key);
+
+            let response = match client.stream_message(&model, api_messages, max_tokens).await {
+                Ok(r) => r,
+                Err(e) => {
+                    let _ = event_tx.send(crate::protocol::Event::new("message.error", serde_json::json!({
+                        "session_id": sid,
+                        "error": { "code": 503, "message": format!("network error: {}", e) },
+                    })));
+                    return;
+                }
+            };
+
+            if !response.status().is_success() {
+                let status = response.status().as_u16();
+                let code = if status == 401 { 401 } else { status as i32 };
+                let body = response.text().await.unwrap_or_default();
+                let _ = event_tx.send(crate::protocol::Event::new("message.error", serde_json::json!({
+                    "session_id": sid,
+                    "error": { "code": code, "message": body },
+                })));
+                return;
+            }
+
+            // Parse SSE stream
+            let byte_stream = response.bytes_stream();
+            let (sse_tx, sse_rx) = mpsc::unbounded_channel();
+
+            let stream_event_tx = event_tx.clone();
+            let stream_sid = sid.clone();
+
+            // SSE parser task
+            tokio::spawn(async move {
+                crate::claude::stream::parse_sse_stream(byte_stream, sse_tx).await;
+            });
+
+            // Normalizer task — returns accumulated assistant text
+            let assistant_text = crate::normalizer::parser::process_stream(
+                &stream_sid, sse_rx, stream_event_tx
+            ).await;
+
+            // Append assistant message to session history for multi-turn context
+            if !assistant_text.is_empty() {
+                let mut inner = inner_ref.lock().unwrap();
+                if let Some(session) = inner.sessions.get_mut(&sid) {
+                    session.messages.push(ChatMessage {
+                        role: "assistant".into(),
+                        content: assistant_text,
+                    });
+                }
+            }
+        });
+
         Ok(())
     }
 
