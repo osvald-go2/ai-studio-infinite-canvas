@@ -1,16 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   GitBranch, GitMerge, ChevronDown, ChevronRight, Check, Trash2, Loader2,
 } from 'lucide-react';
-import { GitInfo, WorktreeInfo, BranchInfo } from '../../types/git';
-import { gitService } from '../../services/git';
+import { BranchInfo } from '../../types/git';
+import { useGit } from '../../contexts/GitProvider';
 
 export interface GitTabProps {
-  workingDir: string;
-  projectDir: string;
-  refreshKey: number;
-  onMerge: (wtPath: string, branch: string) => void;
-  onDiscard: (wtPath: string, branch: string) => void;
+  onMerge?: (wtPath: string, branch: string) => void;
+  onDiscard?: (wtPath: string, branch: string) => void;
 }
 
 function shortenPath(p: string): string {
@@ -56,40 +53,13 @@ function SectionHeader({
 
 // ── Main component ──
 export function GitTab({
-  workingDir,
-  projectDir,
-  refreshKey,
   onMerge,
   onDiscard,
 }: GitTabProps) {
-  const [gitInfo, setGitInfo] = useState<GitInfo | null>(null);
-  const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
-  const [branches, setBranches] = useState<BranchInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { info, worktrees, branches, loading, mergeWorktree, removeWorktree } = useGit();
 
   const [worktreesOpen, setWorktreesOpen] = useState(true);
   const [branchesOpen, setBranchesOpen] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    Promise.all([
-      gitService.info(workingDir),
-      gitService.worktrees(projectDir),
-      gitService.branches(workingDir),
-    ]).then(([info, wt, br]) => {
-      if (!cancelled) {
-        setGitInfo(info);
-        setWorktrees(wt);
-        setBranches(br);
-      }
-    }).catch((err) => {
-      console.error('GitTab fetch error:', err);
-    }).finally(() => {
-      if (!cancelled) setLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, [workingDir, projectDir, refreshKey]);
 
   if (loading) {
     return (
@@ -100,7 +70,7 @@ export function GitTab({
     );
   }
 
-  if (!gitInfo) {
+  if (!info.branch) {
     return (
       <div className="flex items-center justify-center h-full text-zinc-500 text-sm">
         Not a git repository
@@ -110,6 +80,16 @@ export function GitTab({
 
   const sortedBranches = sortBranches(branches);
 
+  const handleMerge = (wtPath: string, branch: string) => {
+    mergeWorktree(wtPath).catch(console.error);
+    onMerge?.(wtPath, branch);
+  };
+
+  const handleDiscard = (wtPath: string, branch: string) => {
+    removeWorktree(wtPath, branch).catch(console.error);
+    onDiscard?.(wtPath, branch);
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* ── Git Status Bar ── */}
@@ -117,28 +97,28 @@ export function GitTab({
         <div className="flex items-center gap-1.5">
           <GitBranch size={14} className="text-amber-400" />
           <span className="text-[13px] font-semibold text-zinc-100">
-            {gitInfo.branch}
+            {info.branch}
           </span>
         </div>
         <div className="flex items-center gap-2 mt-1 flex-wrap">
-          {gitInfo.ahead > 0 && (
+          {info.ahead > 0 && (
             <span className="text-[11px] text-amber-400">
-              ↗ {gitInfo.ahead} ahead
+              {'\u2197'} {info.ahead} ahead
             </span>
           )}
-          {gitInfo.behind > 0 && (
+          {info.behind > 0 && (
             <span className="text-[11px] text-red-400">
-              ↙ {gitInfo.behind} behind
+              {'\u2199'} {info.behind} behind
             </span>
           )}
-          {gitInfo.commit_hash && (
+          {info.commit_hash && (
             <span className="text-[11px] text-zinc-600 font-mono">
-              {gitInfo.commit_hash.slice(0, 7)}
+              {info.commit_hash.slice(0, 7)}
             </span>
           )}
-          {gitInfo.commit_message && (
+          {info.commit_message && (
             <span className="text-[11px] text-zinc-500 truncate flex-1 min-w-0">
-              {gitInfo.commit_message}
+              {info.commit_message}
             </span>
           )}
         </div>
@@ -210,18 +190,18 @@ export function GitTab({
                       {!wt.is_current && !wt.is_main && (
                         <div className="flex gap-1 mt-1.5">
                           <button
-                            onClick={(e) => { e.stopPropagation(); onMerge(wt.path, wt.branch); }}
+                            onClick={(e) => { e.stopPropagation(); handleMerge(wt.path, wt.branch); }}
                             className="flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300 px-1.5 py-0.5 rounded hover:bg-white/[0.06] transition-colors"
                           >
                             <GitMerge size={11} />
-                            合并
+                            {'\u5408\u5E76'}
                           </button>
                           <button
-                            onClick={(e) => { e.stopPropagation(); onDiscard(wt.path, wt.branch); }}
+                            onClick={(e) => { e.stopPropagation(); handleDiscard(wt.path, wt.branch); }}
                             className="flex items-center gap-1 text-[11px] text-red-400 hover:text-red-300 px-1.5 py-0.5 rounded hover:bg-white/[0.06] transition-colors"
                           >
                             <Trash2 size={11} />
-                            舍弃
+                            {'\u820D\u5F03'}
                           </button>
                         </div>
                       )}
