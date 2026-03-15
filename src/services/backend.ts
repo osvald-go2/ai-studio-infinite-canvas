@@ -1,17 +1,17 @@
-import { ContentBlock, Message, DbProject, DbSession } from '../types';
+import { ContentBlock, DbProject, DbSession } from '../types';
 
 function isElectron(): boolean {
   return typeof window !== 'undefined' && window.aiBackend !== undefined;
 }
 
 export const backend = {
-  async createSession(model: string, history?: Message[]): Promise<string> {
+  async createSession(model: string, claudeSessionId?: string): Promise<string> {
     if (!isElectron()) {
       return `mock-${Date.now()}`;
     }
     const result = await window.aiBackend.invoke('session.create', {
       model,
-      history: history?.map(m => ({ role: m.role, content: m.content })),
+      claude_session_id: claudeSessionId,
     });
     return result.session_id;
   },
@@ -33,6 +33,13 @@ export const backend = {
   async killSession(sessionId: string): Promise<void> {
     if (!isElectron()) return;
     await window.aiBackend.invoke('session.kill', {
+      session_id: sessionId,
+    });
+  },
+
+  async interruptSession(sessionId: string): Promise<void> {
+    if (!isElectron()) return;
+    await window.aiBackend.invoke('session.interrupt', {
       session_id: sessionId,
     });
   },
@@ -77,6 +84,11 @@ export const backend = {
   onMessageError(callback: (data: { session_id: string; error: { code: number; message: string } }) => void): void {
     if (!isElectron()) return;
     window.aiBackend.on('message.error', callback);
+  },
+
+  onSessionInit(callback: (data: { session_id: string; claude_session_id: string }) => void): void {
+    if (!isElectron()) return;
+    window.aiBackend.on('session.init', callback);
   },
 
   onSidecarRestarted(callback: () => void): void {
