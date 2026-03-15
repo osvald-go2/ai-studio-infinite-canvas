@@ -19,7 +19,6 @@
 **Files:**
 - Create: `ai-backend/Cargo.toml`
 - Create: `ai-backend/src/main.rs`
-- Create: `ai-backend/src/lib.rs`
 
 - [ ] **Step 1: Create Cargo project**
 
@@ -42,6 +41,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["stream"] }
 uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+bytes = "1"
+futures = "0.3"
 ```
 
 - [ ] **Step 3: Write minimal main.rs that reads stdin and echoes**
@@ -69,15 +71,7 @@ fn main() {
 }
 ```
 
-- [ ] **Step 4: Write lib.rs as module root**
-
-```rust
-pub mod protocol;
-```
-
-(Will add more modules as we create them.)
-
-- [ ] **Step 5: Verify it compiles**
+- [ ] **Step 4: Verify it compiles**
 
 Run: `cd ai-backend && cargo build`
 Expected: Compiles successfully
@@ -332,6 +326,8 @@ pub async fn handle_request(
 
 - [ ] **Step 2: Rewrite main.rs with tokio + stdin/stdout loop**
 
+Note: No `lib.rs` — all modules declared in `main.rs` only (single crate root). Uses `tokio::task::spawn_blocking` for stdout to avoid `StdoutLock` Send issues.
+
 ```rust
 use std::io::{self, Write};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -358,26 +354,24 @@ async fn main() {
     // Channel for streaming events (written to stdout)
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<OutgoingMessage>();
 
-    // Stdout writer task
-    let stdout_tx = event_tx.clone();
-    let (response_tx, mut response_rx) = mpsc::unbounded_channel::<String>();
+    // Single channel for all stdout output (responses + events)
+    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<String>();
 
-    // Dedicated stdout writer — serializes all output
-    let response_tx_for_events = response_tx.clone();
+    // Forward events to the output channel
+    let out_tx_for_events = out_tx.clone();
     tokio::spawn(async move {
         while let Some(msg) = event_rx.recv().await {
             if let Ok(json) = serde_json::to_string(&msg) {
-                let _ = response_tx_for_events.send(json);
+                let _ = out_tx_for_events.send(json);
             }
         }
     });
 
-    // Stdout flush task
-    let response_tx_for_stdout = response_tx.clone();
-    tokio::spawn(async move {
+    // Stdout writer — runs in a blocking thread to avoid Send issues with StdoutLock
+    tokio::task::spawn_blocking(move || {
         let stdout = io::stdout();
         let mut stdout = stdout.lock();
-        while let Some(line) = response_rx.recv().await {
+        while let Some(line) = out_rx.blocking_recv() {
             let _ = writeln!(stdout, "{}", line);
             let _ = stdout.flush();
         }
@@ -403,7 +397,7 @@ async fn main() {
                     format!("invalid JSON: {}", e),
                 );
                 if let Ok(json) = serde_json::to_string(&err_msg) {
-                    let _ = response_tx.send(json);
+                    let _ = out_tx.send(json);
                 }
                 continue;
             }
@@ -411,20 +405,10 @@ async fn main() {
 
         let result = router::handle_request(req, &mut session_manager, event_tx.clone()).await;
         if let Ok(json) = serde_json::to_string(&result) {
-            let _ = response_tx.send(json);
+            let _ = out_tx.send(json);
         }
     }
 }
-```
-
-- [ ] **Step 3: Update lib.rs**
-
-```rust
-pub mod protocol;
-pub mod router;
-pub mod session;
-pub mod claude;
-pub mod normalizer;
 ```
 
 - [ ] **Step 4: Create stub modules so it compiles**
@@ -466,6 +450,7 @@ pub struct SessionSummary {
 Create `ai-backend/src/session/manager.rs`:
 ```rust
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -499,7 +484,13 @@ impl std::fmt::Display for SessionError {
     }
 }
 
+/// SessionManager uses Arc<Mutex<>> for inner state so spawned tasks
+/// can append assistant messages back to conversation history.
 pub struct SessionManager {
+    inner: Arc<Mutex<SessionManagerInner>>,
+}
+
+struct SessionManagerInner {
     sessions: HashMap<String, Session>,
     api_key: Option<String>,
 }
@@ -507,13 +498,15 @@ pub struct SessionManager {
 impl SessionManager {
     pub fn new() -> Self {
         SessionManager {
-            sessions: HashMap::new(),
-            api_key: None,
+            inner: Arc::new(Mutex::new(SessionManagerInner {
+                sessions: HashMap::new(),
+                api_key: None,
+            })),
         }
     }
 
     pub fn set_api_key(&mut self, key: String) {
-        self.api_key = Some(key);
+        self.inner.lock().unwrap().api_key = Some(key);
     }
 
     pub fn create(
@@ -526,10 +519,13 @@ impl SessionManager {
         let mut messages = Vec::new();
 
         // Restore history if provided (crash recovery)
+        // Filter out "system" role — Claude API requires system prompt as a
+        // separate field, not in the messages array
         if let Some(history_val) = history {
             if let Some(arr) = history_val.as_array() {
                 for msg in arr {
                     let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("user");
+                    if role == "system" { continue; }
                     let content = msg.get("content").and_then(|v| v.as_str()).unwrap_or("");
                     messages.push(ChatMessage {
                         role: role.to_string(),
@@ -547,7 +543,7 @@ impl SessionManager {
             messages,
             created_at: now,
         };
-        self.sessions.insert(id.clone(), session);
+        self.inner.lock().unwrap().sessions.insert(id.clone(), session);
         id
     }
 
@@ -557,24 +553,32 @@ impl SessionManager {
         text: &str,
         _event_tx: mpsc::UnboundedSender<OutgoingMessage>,
     ) -> Result<(), SessionError> {
-        let session = self.sessions.get_mut(session_id)
+        let inner = self.inner.lock().unwrap();
+        let session = inner.sessions.get(session_id)
             .ok_or_else(|| SessionError::NotFound(session_id.to_string()))?;
-
-        let _api_key = self.api_key.as_ref()
+        let _api_key = inner.api_key.clone()
             .ok_or(SessionError::NoApiKey)?;
+        drop(inner); // Release lock before async work
 
         // Append user message
-        session.messages.push(ChatMessage {
-            role: "user".into(),
-            content: text.to_string(),
-        });
+        {
+            let mut inner = self.inner.lock().unwrap();
+            let session = inner.sessions.get_mut(session_id).unwrap();
+            session.messages.push(ChatMessage {
+                role: "user".into(),
+                content: text.to_string(),
+            });
+        }
 
-        // TODO: Call Claude API and stream response (Task 6-8)
+        // TODO: Call Claude API and stream response (Task 10)
+        // The spawned task will use self.inner.clone() to append
+        // assistant messages after streaming completes.
         Ok(())
     }
 
     pub fn list(&self) -> Vec<SessionSummary> {
-        self.sessions.values().map(|s| SessionSummary {
+        let inner = self.inner.lock().unwrap();
+        inner.sessions.values().map(|s| SessionSummary {
             id: s.id.clone(),
             model: s.model.clone(),
             message_count: s.messages.len(),
@@ -583,7 +587,12 @@ impl SessionManager {
     }
 
     pub fn kill(&mut self, session_id: &str) {
-        self.sessions.remove(session_id);
+        self.inner.lock().unwrap().sessions.remove(session_id);
+    }
+
+    /// Get a clone of the Arc for use in spawned tasks
+    pub fn inner_ref(&self) -> Arc<Mutex<SessionManagerInner>> {
+        self.inner.clone()
     }
 }
 ```
@@ -632,24 +641,17 @@ Create `ai-backend/src/normalizer/markdown.rs`:
 // Stub — implemented in Task 10
 ```
 
-- [ ] **Step 5: Add chrono dependency to Cargo.toml**
-
-Add to `[dependencies]`:
-```toml
-chrono = { version = "0.4", features = ["serde"] }
-```
-
-- [ ] **Step 6: Verify it compiles**
+- [ ] **Step 5: Verify it compiles**
 
 Run: `cd ai-backend && cargo build`
 Expected: Compiles successfully
 
-- [ ] **Step 7: Test ping manually**
+- [ ] **Step 6: Test ping manually**
 
-Run: `echo '{"id":"1","method":"ping"}' | cd ai-backend && cargo run`
+Run: `cd ai-backend && echo '{"id":"1","method":"ping"}' | cargo run`
 Expected output: `{"pong":true}` (or similar with id)
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add ai-backend/
@@ -1045,22 +1047,15 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Add bytes and futures to Cargo.toml**
-
-```toml
-bytes = "1"
-futures = "0.3"
-```
-
-- [ ] **Step 3: Run tests**
+- [ ] **Step 2: Run tests**
 
 Run: `cd ai-backend && cargo test claude::stream`
 Expected: All 2 tests pass
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add ai-backend/src/claude/stream.rs ai-backend/Cargo.toml
+git add ai-backend/src/claude/stream.rs
 git commit -m "feat: add SSE stream parser for Claude API"
 ```
 
@@ -1468,6 +1463,7 @@ pub async fn process_stream(
 ) -> String {
     let mut block_states: Vec<BlockState> = Vec::new();
     let mut assistant_text = String::new();
+    let mut final_usage: Option<UsageInfo> = None;
 
     while let Some(event) = event_rx.recv().await {
         match event {
@@ -1549,19 +1545,19 @@ pub async fn process_stream(
             }
 
             StreamEvent::MessageDelta { usage, .. } => {
-                // Will be included in message.complete
-                if let Some(usage) = usage {
-                    let _ = event_tx.send(Event::new("message.complete", json!({
-                        "session_id": session_id,
-                        "usage": usage,
-                    })));
+                // Stash usage for message.complete — do NOT emit here
+                if let Some(u) = usage {
+                    final_usage = Some(u);
                 }
             }
 
             StreamEvent::MessageStop => {
-                let _ = event_tx.send(Event::new("message.complete", json!({
-                    "session_id": session_id,
-                })));
+                // Emit message.complete exactly once, with accumulated usage
+                let mut data = json!({ "session_id": session_id });
+                if let Some(usage) = &final_usage {
+                    data["usage"] = json!(usage);
+                }
+                let _ = event_tx.send(Event::new("message.complete", data));
             }
 
             StreamEvent::Error { error } => {
@@ -1729,19 +1725,13 @@ pub async fn send(
     text: &str,
     event_tx: mpsc::UnboundedSender<OutgoingMessage>,
 ) -> Result<(), SessionError> {
-    let session = self.sessions.get_mut(session_id)
+    let inner = self.inner.lock().unwrap();
+    let session = inner.sessions.get(session_id)
         .ok_or_else(|| SessionError::NotFound(session_id.to_string()))?;
-
-    let api_key = self.api_key.clone()
+    let api_key = inner.api_key.clone()
         .ok_or(SessionError::NoApiKey)?;
 
-    // Append user message
-    session.messages.push(ChatMessage {
-        role: "user".into(),
-        content: text.to_string(),
-    });
-
-    // Build API messages
+    // Build API messages from current history
     let api_messages: Vec<crate::claude::types::ApiMessage> = session.messages.iter()
         .map(|m| crate::claude::types::ApiMessage {
             role: m.role.clone(),
@@ -1752,6 +1742,27 @@ pub async fn send(
     let model = session.model.clone();
     let max_tokens = session.max_tokens;
     let sid = session_id.to_string();
+    drop(inner); // Release lock before async work
+
+    // Append user message
+    {
+        let mut inner = self.inner.lock().unwrap();
+        let session = inner.sessions.get_mut(session_id).unwrap();
+        session.messages.push(ChatMessage {
+            role: "user".into(),
+            content: text.to_string(),
+        });
+    }
+
+    // Add user message to API request
+    let mut api_messages = api_messages;
+    api_messages.push(crate::claude::types::ApiMessage {
+        role: "user".into(),
+        content: text.to_string(),
+    });
+
+    // Clone Arc for the spawned task to append assistant message
+    let inner_ref = self.inner.clone();
 
     // Spawn streaming task
     tokio::spawn(async move {
@@ -1791,8 +1802,21 @@ pub async fn send(
             crate::claude::stream::parse_sse_stream(byte_stream, sse_tx).await;
         });
 
-        // Normalizer task
-        crate::normalizer::parser::process_stream(&stream_sid, sse_rx, stream_event_tx).await;
+        // Normalizer task — returns accumulated assistant text
+        let assistant_text = crate::normalizer::parser::process_stream(
+            &stream_sid, sse_rx, stream_event_tx
+        ).await;
+
+        // Append assistant message to session history for multi-turn context
+        if !assistant_text.is_empty() {
+            let mut inner = inner_ref.lock().unwrap();
+            if let Some(session) = inner.sessions.get_mut(&sid) {
+                session.messages.push(ChatMessage {
+                    role: "assistant".into(),
+                    content: assistant_text,
+                });
+            }
+        }
     });
 
     Ok(())
@@ -2152,7 +2176,10 @@ Main process: creates window, spawns sidecar, bridges IPC.
 ```typescript
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
+import Store from 'electron-store';
 import { SidecarManager } from './sidecar';
+
+const store = new Store<{ anthropicApiKey?: string }>();
 
 let mainWindow: BrowserWindow | null = null;
 let sidecar: SidecarManager | null = null;
@@ -2181,16 +2208,22 @@ function createWindow(): void {
   });
 }
 
+function getSidecarEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  // Priority: electron-store > env var
+  const storedKey = store.get('anthropicApiKey');
+  const envKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = storedKey || envKey;
+  if (apiKey) {
+    env.ANTHROPIC_API_KEY = apiKey;
+  }
+  return env;
+}
+
 function startSidecar(): void {
   sidecar = new SidecarManager();
 
-  // Pass API key from env if available
-  const env: Record<string, string> = {};
-  if (process.env.ANTHROPIC_API_KEY) {
-    env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-  }
-
-  sidecar.spawn(env);
+  sidecar.spawn(getSidecarEnv());
 
   // Forward sidecar events to renderer
   sidecar.on('event', (eventName: string, data: any) => {
@@ -2199,16 +2232,15 @@ function startSidecar(): void {
     }
   });
 
-  // Handle sidecar crashes
+  // Handle sidecar crashes — respawn with persisted API key
   sidecar.on('crashed', (code: number | null) => {
     console.log(`[main] sidecar crashed with code ${code}, restarting...`);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('sidecar:event', 'sidecar.restarted', {});
     }
-    // Auto-restart after short delay
     setTimeout(() => {
       if (sidecar) {
-        sidecar.spawn(env);
+        sidecar.spawn(getSidecarEnv());
       }
     }, 1000);
   });
@@ -2219,6 +2251,12 @@ ipcMain.handle('sidecar:invoke', async (_, method: string, params: any) => {
   if (!sidecar || !sidecar.isRunning()) {
     throw new Error('sidecar not running');
   }
+
+  // Persist API key to electron-store when set via protocol
+  if (method === 'config.set_api_key' && params?.api_key) {
+    store.set('anthropicApiKey', params.api_key);
+  }
+
   return sidecar.invoke(method, params);
 });
 
@@ -2309,6 +2347,12 @@ export const backend = {
     await window.aiBackend.invoke('config.set_api_key', {
       api_key: apiKey,
     });
+  },
+
+  async listSessions(): Promise<any[]> {
+    if (!isElectron) return [];
+    const result = await window.aiBackend.invoke('session.list');
+    return result.sessions;
   },
 
   async ping(): Promise<boolean> {
