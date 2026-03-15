@@ -230,22 +230,31 @@ Accept optional `claude_session_id` parameter:
 }
 ```
 
-**`session.init` event handling:**
+**`claude_session_id` write-back via slot:**
 
-In the event forwarding loop (where outgoing events are sent to the frontend via IPC), intercept `session.init` events to update the session manager before forwarding:
+The `Arc<Mutex<Option<String>>>` slot from section 3 is the sole mechanism for updating `ActiveSession.claude_session_id`. No event interception in `main.rs` is needed (the event forwarding loop in `main.rs` has no per-event inspection and modifying it would require sharing `session_manager` across async tasks).
+
+In `SessionManager::send()`, after spawning the normalizer task, spawn a small follow-up task that awaits the slot being filled:
 
 ```rust
-// In the event forwarding loop in router.rs / main.rs
-if event.name == "session.init" {
-    if let Some(csid) = event.data["claude_session_id"].as_str() {
-        let internal_sid = event.data["session_id"].as_str().unwrap();
-        let mut sessions = session_manager.sessions.lock().unwrap();
-        if let Some(active) = sessions.get_mut(internal_sid) {
-            active.claude_session_id = Some(csid.to_string());
+let sessions_arc = self.sessions_arc();
+let sid_owned = session_id.to_string();
+let slot = claude_sid_slot.clone();
+
+tokio::spawn(async move {
+    // Poll briefly for the init event (should arrive within first few messages)
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let val = slot.lock().unwrap().clone();
+        if let Some(csid) = val {
+            let mut sessions = sessions_arc.lock().unwrap();
+            if let Some(active) = sessions.get_mut(&sid_owned) {
+                active.claude_session_id = Some(csid);
+            }
+            break;
         }
     }
-    // Continue forwarding to frontend
-}
+});
 ```
 
 ### 5. Database — Schema change
@@ -333,6 +342,8 @@ if (isElectron() && backendSessionIdRef.current) {
     // Do NOT clear backendSessionIdRef — process stays alive
 }
 ```
+
+**Status after interrupt:** Keep setting `status: 'review'` as before. Even though the process is alive, the user has explicitly stopped generation. `'review'` correctly signals "AI finished (or was stopped), awaiting user action." The status returns to `'inprocess'` on the next `handleSend`.
 
 ### 4. `SessionWindow.tsx` — handleSend (resume path)
 
@@ -431,11 +442,21 @@ When sidecar restarts, all Claude CLI processes are dead. Clear all `backendSess
 
 6. **Post-SIGINT stdout behavior:** After SIGINT, Claude CLI will stop generating and emit a `result` event (likely with `is_error: true` or `subtype: "interrupted"`). The normalizer will fire `message.complete`. The frontend already sets `isStreaming(false)` in `handleStop` before the result arrives — if `message.complete` fires later, the handler should be a no-op (check `isStreamingRef`).
 
-7. **`--resume` + `--input-format stream-json` history replay:** When Claude CLI resumes, it may replay previous conversation turns through stdout. The normalizer will emit block events for replayed content. Since the frontend already has these messages in its history, the replay content will appear as duplicate blocks in the current assistant message. **Mitigation:** The normalizer should detect the `init` event's replay phase and skip emitting block events until the first genuinely new content arrives. Alternatively, the frontend can filter blocks that match already-rendered content. This needs verification during implementation.
+7. **`--resume` + `--input-format stream-json` history replay:** When Claude CLI resumes, it may replay previous conversation turns through stdout. The normalizer will emit block events for replayed content, causing duplicates in the frontend.
+
+   **Chosen mitigation — normalizer-side filtering:** Add a `is_resuming: bool` flag to `process_claude_stream`. When `resume_session_id` was provided, set `is_resuming = true`. In this mode, skip emitting `block.start`/`block.stop` events for all `Assistant` and `User` messages until the first `Result` event is seen (which marks the end of replayed history). After the first `Result`, set `is_resuming = false` and process all subsequent messages normally. If Claude CLI does NOT replay history on resume (i.e., it only outputs the `init` event and then waits for new input), the flag never triggers and has no effect — safe either way. **This behavior must be verified during implementation** by running `claude -p --resume <id> --output-format stream-json` manually and observing the stdout output.
 
 8. **`sidecar.restarted` handler location:** Register in each `SessionWindow`'s `useEffect`, clearing `backendSessionIdRef.current = null`. The existing `backend.onSidecarRestarted()` API is available but currently unused. Each SessionWindow instance listens independently; no App-level broadcast needed.
 
-9. **Event listener cleanup:** The `session.init` listener (and all other `backend.on*` listeners) should be cleaned up in the `useEffect` return function using corresponding `off` methods to prevent accumulation on re-renders.
+9. **Event listener cleanup:** The `session.init` listener (and all other `backend.on*` listeners) should be cleaned up in the `useEffect` return function. The `preload.ts` `off()` method matches callbacks by an internal `__handler` property set during `on()`. To ensure `off()` works, store the callback in a variable (not an inline arrow) and pass the same reference to both `on` and `off`:
+
+   ```typescript
+   useEffect(() => {
+       const handleSessionInit = (data: ...) => { ... };
+       backend.onSessionInit(handleSessionInit);
+       return () => { window.aiBackend.off('session.init', handleSessionInit); };
+   }, []);
+   ```
 
 10. **Error UX on resume failure:** When the retry in error recovery (section 6) also fails, add an error content block to the assistant message so the user sees feedback, rather than silently logging to console.
 
