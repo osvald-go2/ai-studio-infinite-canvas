@@ -2,10 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Session } from '../types';
 import { SessionWindow } from './SessionWindow';
 import { ZoomIn, ZoomOut, Maximize, Hand, MousePointer2, Send, Map } from 'lucide-react';
-
-const SESSION_WIDTH = 600;
-const SESSION_DEFAULT_HEIGHT = 700;
-const SESSION_MIN_HEIGHT = 100;
+import { SESSION_WIDTH, SESSION_DEFAULT_HEIGHT, SESSION_MIN_HEIGHT } from '@/constants';
 
 export function CanvasView({
   sessions,
@@ -13,14 +10,18 @@ export function CanvasView({
   onOpenReview,
   focusedSessionId,
   projectDir,
+  transform,
+  onTransformChange,
 }: {
   sessions: Session[],
   setSessions: any,
   onOpenReview: (id: string) => void,
   focusedSessionId?: string | null,
   projectDir?: string | null,
+  transform: { x: number; y: number; scale: number },
+  onTransformChange: React.Dispatch<React.SetStateAction<{ x: number; y: number; scale: number }>>,
 }) {
-  const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
+  const setTransform = onTransformChange;
   const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
   const [lastPos, setLastPos] = useState({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
@@ -85,10 +86,12 @@ export function CanvasView({
     if (!container) return;
 
     const handleNativeWheel = (e: WheelEvent) => {
-      const isScrollable = (e.target as HTMLElement).closest('.custom-scrollbar') || (e.target as HTMLElement).closest('.overflow-y-auto');
-      
+      const target = e.target as HTMLElement;
+      const isInsideSession = target.closest('.session-container');
+
       if (e.ctrlKey || e.metaKey) {
-        e.preventDefault(); 
+        if (isInsideSession) return;
+        e.preventDefault();
         const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
         setTransform(prev => {
           const newScale = Math.max(0.1, Math.min(prev.scale * zoomFactor, 3));
@@ -102,8 +105,8 @@ export function CanvasView({
           return { x: newX, y: newY, scale: newScale };
         });
       } else {
-        if (isScrollable) return;
-        e.preventDefault(); 
+        if (isInsideSession) return;
+        e.preventDefault();
         setTransform(prev => ({
           ...prev,
           x: prev.x - e.deltaX,
@@ -391,7 +394,7 @@ function CanvasMinimap({
   sessions: Session[];
   transform: { x: number; y: number; scale: number };
   containerRef: React.RefObject<HTMLDivElement | null>;
-  onNavigate: (t: { x: number; y: number; scale: number }) => void;
+  onNavigate: React.Dispatch<React.SetStateAction<{ x: number; y: number; scale: number }>>;
 }) {
   const minimapRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
