@@ -14,3 +14,4 @@ bytes = "1"
 futures = "0.3"
 rusqlite = { version = "0.31", features = ["bundled"] }
 dirs = "5"
+notify = "7"
