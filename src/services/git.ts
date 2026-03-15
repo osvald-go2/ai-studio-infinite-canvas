@@ -117,6 +117,28 @@ export const gitService = {
     return invoke<BranchDiffStats>('git.branch_diff_stats', { dir, base_branch: baseBranch });
   },
 
+  async fileTree(dir: string): Promise<string[]> {
+    if (!isElectron()) return [];
+    const result = await invoke<{ files: string[] }>('git.file_tree', { dir });
+    return result.files;
+  },
+
+  async fileContent(dir: string, filePath: string, gitRef?: string): Promise<string> {
+    if (!isElectron()) return '';
+    const result = await invoke<{ content: string }>('git.file_content', { dir, path: filePath, ref: gitRef });
+    return result.content;
+  },
+
+  async watch(dir: string): Promise<void> {
+    if (!isElectron()) return;
+    await invoke<void>('git.watch', { dir });
+  },
+
+  async unwatch(dir: string): Promise<void> {
+    if (!isElectron()) return;
+    await invoke<void>('git.unwatch', { dir });
+  },
+
   async generateCommitMsg(dir: string): Promise<string> {
     if (!isElectron()) return `ephemeral-mock-${Date.now()}`;
     const result = await invoke<{ session_id: string }>('git.generate_commit_msg', { dir });
