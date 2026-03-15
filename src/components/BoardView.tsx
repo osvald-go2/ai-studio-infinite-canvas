@@ -18,16 +18,18 @@ const COLUMNS: {
   { id: 'done', title: 'Done', color: 'text-emerald-300', badgeBg: 'bg-emerald-500/20 text-emerald-300', cardBorder: 'border-t-emerald-500/50', cardBgHover: 'hover:bg-emerald-500/10', dotColor: 'text-emerald-400' },
 ];
 
-export function BoardView({ 
-  sessions, 
-  setSessions, 
+export function BoardView({
+  sessions,
+  setSessions,
   onOpenReview,
-  focusedSessionId
-}: { 
-  sessions: Session[], 
-  setSessions: any, 
+  focusedSessionId,
+  projectDir,
+}: {
+  sessions: Session[],
+  setSessions: any,
   onOpenReview: (id: string) => void,
-  focusedSessionId?: string | null
+  focusedSessionId?: string | null,
+  projectDir?: string | null,
 }) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [displaySession, setDisplaySession] = useState<Session | null>(null);
@@ -235,12 +237,13 @@ export function BoardView({
       >
         {displaySession && (
           <div className="flex-1 overflow-hidden relative flex flex-col">
-             <SessionWindow 
-               session={displaySession} 
+             <SessionWindow
+               session={displaySession}
                onUpdate={(updated) => setSessions((prev: Session[]) => prev.map(s => s.id === updated.id ? updated : s))}
                onClose={() => setActiveSessionId(null)}
                onOpenReview={() => onOpenReview(displaySession.id)}
                fullScreen={true}
+               projectDir={projectDir}
              />
           </div>
         )}

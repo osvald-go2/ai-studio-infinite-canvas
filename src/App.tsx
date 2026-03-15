@@ -10,8 +10,10 @@ import { TabView } from './components/TabView';
 import { TopBar } from './components/TopBar';
 import { NewSessionModal } from './components/NewSessionModal';
 import { GitReviewPanel } from './components/git/GitReviewPanel';
+import { GitPanel } from './components/git/GitPanel';
 import { Session, SessionStatus, DbProject, DbSession } from './types';
 import { backend } from './services/backend';
+import { gitService } from './services/git';
 import { initialSessions } from './data';
 
 export default function App() {
@@ -33,6 +35,25 @@ export default function App() {
   const sessionCreatedAtRef = useRef<Record<string, string>>({});
   const loadedSessionIdsRef = useRef<Set<string>>(new Set());
   const isElectronApp = typeof window !== 'undefined' && (window as any).aiBackend !== undefined;
+
+  // On Electron startup: load last project dir
+  useEffect(() => {
+    if (!isElectronApp) return;
+    const aiBackend = (window as any).aiBackend;
+    aiBackend.getLastProjectDir().then(async (dir: string | null) => {
+      if (dir) {
+        setProjectDir(dir);
+        const isRepo = await gitService.checkRepo(dir).catch(() => false);
+        setIsGitRepo(isRepo);
+      }
+    }).catch(() => {});
+  }, []);
+
+  // Re-check git repo status when projectDir changes
+  useEffect(() => {
+    if (!projectDir) return;
+    gitService.checkRepo(projectDir).then(setIsGitRepo).catch(() => setIsGitRepo(false));
+  }, [projectDir]);
 
   // Load project and sessions from backend on mount
   useEffect(() => {
@@ -177,6 +198,21 @@ export default function App() {
     setTimeout(() => setFocusedSessionId(null), 100);
   };
 
+  const handleSessionUpdate = (id: string, updates: Partial<Session>) => {
+    setSessions((prev) => prev.map((s) => s.id === id ? { ...s, ...updates } : s));
+  };
+
+  const handleOpenDirectory = async () => {
+    if (!isElectronApp) return;
+    const aiBackend = (window as any).aiBackend;
+    const dir = await aiBackend.openDirectory().catch(() => null);
+    if (dir) {
+      setProjectDir(dir);
+      const isRepo = await gitService.checkRepo(dir).catch(() => false);
+      setIsGitRepo(isRepo);
+    }
+  };
+
   const reviewSession = sessions.find(s => s.id === reviewSessionId) || null;
 
   return (
@@ -187,43 +223,66 @@ export default function App() {
         style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop)' }}
       />
       
-      <TopBar 
-        viewMode={viewMode} 
-        setViewMode={setViewMode} 
-        onNewSession={() => setIsNewModalOpen(true)} 
+      <TopBar
+        viewMode={viewMode}
+        setViewMode={setViewMode}
+        onNewSession={() => setIsNewModalOpen(true)}
         sessions={sessions}
         onLocateSession={handleLocateSession}
+        showGitPanel={showGitPanel}
+        onToggleGitPanel={() => setShowGitPanel((v) => !v)}
+        onOpenDirectory={handleOpenDirectory}
+        projectDir={projectDir}
       />
-      
-      <div className="flex-1 min-h-0 relative z-10">
-        {viewMode === 'canvas' ? (
-          <CanvasView 
-            sessions={sessions} 
-            setSessions={setSessions} 
-            onOpenReview={(sessionId) => setReviewSessionId(sessionId)}
+
+      <div className="flex-1 min-h-0 relative z-10 flex overflow-hidden">
+        <div className="flex-1 min-w-0 min-h-0">
+          {viewMode === 'canvas' ? (
+            <CanvasView
+              sessions={sessions}
+              setSessions={setSessions}
+              onOpenReview={(sessionId) => setReviewSessionId(sessionId)}
+              focusedSessionId={focusedSessionId}
+              projectDir={projectDir}
+            />
+          ) : viewMode === 'board' ? (
+            <BoardView
+              sessions={sessions}
+              setSessions={setSessions}
+              onOpenReview={(sessionId) => setReviewSessionId(sessionId)}
+              focusedSessionId={focusedSessionId}
+              projectDir={projectDir}
+            />
+          ) : (
+            <TabView
+              sessions={sessions}
+              setSessions={setSessions}
+              onOpenReview={(sessionId) => setReviewSessionId(sessionId)}
+              focusedSessionId={focusedSessionId}
+              projectDir={projectDir}
+            />
+          )}
+        </div>
+
+        {/* Git Panel — side panel */}
+        {projectDir && (
+          <GitPanel
+            isOpen={showGitPanel}
+            onClose={() => setShowGitPanel(false)}
+            projectDir={projectDir}
+            sessions={sessions}
             focusedSessionId={focusedSessionId}
-          />
-        ) : viewMode === 'board' ? (
-          <BoardView 
-            sessions={sessions} 
-            setSessions={setSessions} 
-            onOpenReview={(sessionId) => setReviewSessionId(sessionId)}
-            focusedSessionId={focusedSessionId}
-          />
-        ) : (
-          <TabView 
-            sessions={sessions} 
-            setSessions={setSessions} 
-            onOpenReview={(sessionId) => setReviewSessionId(sessionId)}
-            focusedSessionId={focusedSessionId}
+            onSessionUpdate={handleSessionUpdate}
           />
         )}
       </div>
 
-      <NewSessionModal 
-        isOpen={isNewModalOpen} 
-        onClose={() => setIsNewModalOpen(false)} 
-        onCreate={handleCreateSession} 
+      <NewSessionModal
+        isOpen={isNewModalOpen}
+        onClose={() => setIsNewModalOpen(false)}
+        onCreate={handleCreateSession}
+        projectDir={projectDir}
+        isGitRepo={isGitRepo}
       />
 
       <GitReviewPanel

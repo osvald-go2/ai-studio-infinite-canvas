@@ -2,17 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { Session } from '../types';
 import { SessionWindow } from './SessionWindow';
 import { MessageSquare, GitBranch, FolderGit2, Search } from 'lucide-react';
+import { STATUS_COLORS } from '../utils/statusColors';
 
-export function TabView({ 
-  sessions, 
-  setSessions, 
+export function TabView({
+  sessions,
+  setSessions,
   onOpenReview,
-  focusedSessionId
-}: { 
-  sessions: Session[], 
-  setSessions: any, 
+  focusedSessionId,
+  projectDir,
+}: {
+  sessions: Session[],
+  setSessions: any,
   onOpenReview: (id: string) => void,
-  focusedSessionId?: string | null
+  focusedSessionId?: string | null,
+  projectDir?: string | null,
 }) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(sessions[0]?.id || null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -64,10 +67,7 @@ export function TabView({
                   {session.title}
                 </span>
                 <span className={`text-[10px] px-2 py-0.5 rounded-full uppercase font-semibold shrink-0 tracking-wide ${
-                  session.status === 'inbox' ? 'bg-[#3B82F633] text-[#60A5FA]' :
-                  session.status === 'inprocess' ? 'bg-[#F59E0B33] text-[#FBBF24]' :
-                  session.status === 'review' ? 'bg-[#8B5CF633] text-[#A78BFA]' :
-                  'bg-[#10B98133] text-[#34D399]'
+                  STATUS_COLORS[session.status].badgeBg} ${STATUS_COLORS[session.status].badgeText
                 }`}>
                   {session.status === 'inprocess' ? 'IN PROCESS' : session.status}
                 </span>
@@ -108,6 +108,7 @@ export function TabView({
             onClose={() => setActiveSessionId(null)}
             fullScreen={true}
             variant="tab"
+            projectDir={projectDir}
           />
         ) : (
           <div className="flex flex-col items-center justify-center w-full h-full text-gray-500 gap-4">

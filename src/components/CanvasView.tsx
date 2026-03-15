@@ -7,16 +7,18 @@ const SESSION_WIDTH = 600;
 const SESSION_DEFAULT_HEIGHT = 700;
 const SESSION_MIN_HEIGHT = 100;
 
-export function CanvasView({ 
-  sessions, 
-  setSessions, 
+export function CanvasView({
+  sessions,
+  setSessions,
   onOpenReview,
-  focusedSessionId
-}: { 
-  sessions: Session[], 
-  setSessions: any, 
+  focusedSessionId,
+  projectDir,
+}: {
+  sessions: Session[],
+  setSessions: any,
   onOpenReview: (id: string) => void,
-  focusedSessionId?: string | null
+  focusedSessionId?: string | null,
+  projectDir?: string | null,
 }) {
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
   const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
@@ -248,9 +250,10 @@ export function CanvasView({
               setSessions((prev: Session[]) => prev.map(s => s.id === updated.id ? updated : s));
             }}
             onOpenReview={() => onOpenReview(session.id)}
+            projectDir={projectDir}
           />
         ))}
-        
+
         {/* Selection Box */}
         {selectionBox && (
           <div 
@@ -605,7 +608,8 @@ function DraggableSession({
   onGroupDragMove,
   onSelect,
   updateSession,
-  onOpenReview
+  onOpenReview,
+  projectDir,
 }: {
   session: Session,
   transformScale: number,
@@ -617,7 +621,8 @@ function DraggableSession({
   onGroupDragMove: (dx: number, dy: number) => void,
   onSelect?: (multi: boolean) => void,
   updateSession: (s: Session) => void,
-  onOpenReview: () => void
+  onOpenReview: () => void,
+  projectDir?: string | null,
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
@@ -766,6 +771,7 @@ function DraggableSession({
         height={currentHeight}
         animateHeight={animateHeight}
         onHeaderDoubleClick={handleHeaderDoubleClick}
+        projectDir={projectDir}
       />
       {/* Resize handle */}
       <div

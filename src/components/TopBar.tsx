@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { LayoutDashboard, Maximize, Plus, ChevronDown, Check, FolderOpen, Search, Columns } from 'lucide-react';
+import { LayoutDashboard, Maximize, Plus, ChevronDown, Check, FolderOpen, Search, Columns, GitBranch } from 'lucide-react';
 import { Session } from '../types';
 
 const MOCK_PROJECTS = [
@@ -8,18 +8,26 @@ const MOCK_PROJECTS = [
   { id: '3', name: 'mobile-app', path: '~/Projects/mobile-app', abbr: 'MA', color: 'bg-purple-500' },
 ];
 
-export function TopBar({ 
-  viewMode, 
-  setViewMode, 
+export function TopBar({
+  viewMode,
+  setViewMode,
   onNewSession,
   sessions,
-  onLocateSession
-}: { 
-  viewMode: 'canvas' | 'board' | 'tab', 
-  setViewMode: (mode: 'canvas' | 'board' | 'tab') => void, 
+  onLocateSession,
+  showGitPanel,
+  onToggleGitPanel,
+  onOpenDirectory,
+  projectDir,
+}: {
+  viewMode: 'canvas' | 'board' | 'tab',
+  setViewMode: (mode: 'canvas' | 'board' | 'tab') => void,
   onNewSession: () => void,
   sessions: Session[],
-  onLocateSession: (id: string) => void
+  onLocateSession: (id: string) => void,
+  showGitPanel?: boolean,
+  onToggleGitPanel?: () => void,
+  onOpenDirectory?: () => void,
+  projectDir?: string | null,
 }) {
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState('1');
@@ -97,8 +105,11 @@ export function TopBar({
                 ))}
               </div>
               <div className="border-t border-white/10 p-2">
-                <button 
-                  onClick={() => setIsProjectDropdownOpen(false)}
+                <button
+                  onClick={() => {
+                    setIsProjectDropdownOpen(false);
+                    onOpenDirectory?.();
+                  }}
                   className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/10 rounded-lg transition-colors text-left text-gray-300 hover:text-white"
                 >
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-white/5 shrink-0">
@@ -185,6 +196,19 @@ export function TopBar({
           )}
         </div>
 
+        {onToggleGitPanel && (
+          <button
+            onClick={onToggleGitPanel}
+            title="Toggle Git Panel"
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+              showGitPanel
+                ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
+                : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-200'
+            }`}
+          >
+            <GitBranch size={16} />
+          </button>
+        )}
         <button onClick={onNewSession} className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
           <Plus size={16} />
           New Session
