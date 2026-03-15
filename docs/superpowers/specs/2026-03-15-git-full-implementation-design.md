@@ -62,7 +62,7 @@ In `App.tsx`, wrapping the area that needs git data. Receives `projectDir` as pr
 
 ### Relationship with Existing Code
 
-- `gitService.ts` stays as the API layer; new methods added for new backend APIs (`fileTree`, `fileContent`, `showCommit`, `watch`, `unwatch`)
+- `gitService.ts` stays as the API layer; new methods added for new backend APIs (`fileTree`, `fileContent`, `watch`, `unwatch`)
 - Components use `useGit()` hook for data, stop calling `gitService` directly
 - UI state in App.tsx (`showGitPanel`, etc.) stays in App.tsx; only git data state moves into Provider
 
@@ -251,12 +251,21 @@ Full mock demo experience in browser, real data in Electron.
 |------|--------|
 | `src/services/mockGit.ts` | Never used, functionality migrated to mockGitData.ts |
 
+### Deleted Files (additional)
+
+| File | Reason |
+|------|--------|
+| `src/components/git/DiffPanel.tsx` | Dead code after GitReviewPanel migrates to DiffView; depends on deleted `FileDiff` type |
+| `src/components/git/DiffSideBySide.tsx` | Only consumed by DiffPanel.tsx; depends on deleted `FileDiff` type |
+| `src/components/git/DiffNewFile.tsx` | Only consumed by DiffPanel.tsx; depends on deleted `FileDiff` type |
+| `src/components/git/DiffDeletedFile.tsx` | Only consumed by DiffPanel.tsx; depends on deleted `FileDiff` type |
+
 ### Unchanged Files
 
-- `DiffView.tsx` / `DiffSideBySide.tsx` / `DiffNewFile.tsx` / `DiffDeletedFile.tsx` — already consume `DiffHunk[]`, reused as-is
+- `DiffView.tsx` — already consumes `DiffHunk[]`, reused as-is by GitReviewPanel
 - `CommitSection.tsx` / `MergeDialog.tsx` / `DiscardWorktreeDialog.tsx` — complete, no changes needed
 - `electron/main.ts` / `electron/preload.ts` — event forwarding already handles arbitrary events, no changes needed
 
 ### Scale
 
-~3 new files + ~15 modified files + 1 deleted file
+~3 new files + ~15 modified files + 5 deleted files
