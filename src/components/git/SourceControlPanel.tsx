@@ -1,38 +1,16 @@
 import React, { useRef, useLayoutEffect, useState, useCallback } from 'react';
 import { X, Check, ChevronDown, ChevronRight, Sparkles, Loader2, Undo2, GitBranch, RefreshCw, FileCode, FileText, FileJson, File } from 'lucide-react';
-import { Session, FileDiff } from '../../types';
-
-interface CommitLog {
-  hash: string;
-  message: string;
-  author: string;
-  branch?: string;
-  isMerge?: boolean;
-  color: string;
-}
-
-const MOCK_COMMITS: CommitLog[] = [
-  { hash: 'a1b2c3d', message: 'feat: add AI commit message generation', author: 'you', branch: 'main', color: 'bg-blue-400' },
-  { hash: 'e4f5g6h', message: 'refactor: update session status transitions', author: 'you', color: 'bg-blue-400' },
-  { hash: 'i7j8k9l', message: 'style: unify color palette across views', author: 'you', color: 'bg-blue-400' },
-  { hash: 'm0n1o2p', message: 'fix: input accent color to hex+opacity format', author: 'you', color: 'bg-blue-400' },
-  { hash: 'q3r4s5t', message: 'Merge PR #12: canvas multi-select broadcast', author: 'collaborator', isMerge: true, color: 'bg-yellow-400' },
-  { hash: 'u6v7w8x', message: 'feat: add broadcast messaging to canvas', author: 'collaborator', color: 'bg-rose-400' },
-  { hash: 'y9z0a1b', message: 'fix: Tailwind rgba syntax underscores', author: 'you', color: 'bg-blue-400' },
-  { hash: 'c2d3e4f', message: 'feat: implement board view drag and drop', author: 'you', color: 'bg-blue-400' },
-  { hash: 'g5h6i7j', message: 'Merge PR #8: tab view search filter', author: 'collaborator', isMerge: true, color: 'bg-yellow-400' },
-  { hash: 'k8l9m0n', message: 'feat: add session search in tab view', author: 'collaborator', color: 'bg-emerald-400' },
-];
+import { useGit } from '../../contexts/GitProvider';
+import type { FileChange } from '../../types/git';
 
 interface SourceControlPanelProps {
-  session: Session;
   commitMessage: string;
   onCommitMessageChange: (msg: string) => void;
   onCommit: () => void;
   onDiscard: () => void;
   onClose: () => void;
-  onSelectFile: (file: FileDiff) => void;
-  selectedFile: FileDiff | null;
+  onSelectFile: (file: FileChange) => void;
+  selectedFile: FileChange | null;
   onGenerateCommitMessage: () => void;
   isGeneratingCommit: boolean;
 }
@@ -59,7 +37,6 @@ function getFileIcon(filename: string) {
 }
 
 export function SourceControlPanel({
-  session,
   commitMessage,
   onCommitMessageChange,
   onCommit,
@@ -70,7 +47,7 @@ export function SourceControlPanel({
   onGenerateCommitMessage,
   isGeneratingCommit,
 }: SourceControlPanelProps) {
-  const diff = session.diff;
+  const { changes, log, info } = useGit();
   const [changesOpen, setChangesOpen] = useState(true);
   const [graphHeight, setGraphHeight] = useState<number | null>(null);
   const isDragging = useRef(false);
@@ -78,6 +55,8 @@ export function SourceControlPanel({
   const startHeight = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const branch = info.branch || 'main';
 
   const getEffectiveHeight = useCallback(() => {
     if (graphHeight !== null) return graphHeight;
@@ -118,10 +97,6 @@ export function SourceControlPanel({
     el.style.overflowY = el.scrollHeight > 240 ? 'auto' : 'hidden';
   }, [commitMessage]);
 
-  if (!diff) return null;
-
-  const branch = session.gitBranch || 'main';
-
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && commitMessage.trim()) {
       e.preventDefault();
@@ -152,7 +127,7 @@ export function SourceControlPanel({
             onChange={(e) => onCommitMessageChange(e.target.value)}
             onKeyDown={handleKeyDown}
             rows={1}
-            placeholder={`Message (⌘Enter to commit on "${branch}")`}
+            placeholder={`Message (\u2318Enter to commit on "${branch}")`}
             className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 pr-8 text-[13px] text-white placeholder:text-gray-600 outline-none focus:border-white/20 resize-none custom-scrollbar overflow-hidden"
             style={{ minHeight: '34px', maxHeight: '240px' }}
           />
@@ -208,7 +183,7 @@ export function SourceControlPanel({
               <Undo2 size={12} />
             </button>
             <span className="bg-white/10 text-gray-400 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-medium">
-              {diff.files.length}
+              {changes.length}
             </span>
           </div>
         </div>
@@ -216,9 +191,9 @@ export function SourceControlPanel({
         {/* File list */}
         {changesOpen && (
           <div>
-            {diff.files.map((file, idx) => {
-              const isSelected = selectedFile?.filename === file.filename;
-              const fileName = file.filename.split('/').pop() || file.filename;
+            {changes.map((file, idx) => {
+              const isSelected = selectedFile?.path === file.path;
+              const fileName = file.path.split('/').pop() || file.path;
               const st = file.status === 'M' ? { color: 'text-yellow-500', label: 'M' }
                        : file.status === 'A' ? { color: 'text-green-500', label: 'U' }
                        : { color: 'text-red-500', label: 'D' };
@@ -232,7 +207,7 @@ export function SourceControlPanel({
                   }`}
                 >
                   <div className="flex items-center gap-2 overflow-hidden min-w-0">
-                    {getFileIcon(file.filename)}
+                    {getFileIcon(file.path)}
                     <span className={`text-[13px] truncate ${isSelected ? 'text-white' : 'text-gray-300'}`}>
                       {fileName}
                     </span>
@@ -291,11 +266,11 @@ export function SourceControlPanel({
         </div>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar px-2 pb-2">
-          {MOCK_COMMITS.map((commit, idx) => (
+          {log.map((commit, idx) => (
             <div key={commit.hash} className="flex items-start gap-2 group hover:bg-white/[0.03] rounded px-2 py-1 cursor-default">
               <div className="flex flex-col items-center flex-shrink-0 pt-1.5" style={{ width: '16px' }}>
-                <div className={`w-2.5 h-2.5 rounded-full ${commit.color} flex-shrink-0 ${commit.isMerge ? 'ring-2 ring-white/20' : ''}`} />
-                {idx < MOCK_COMMITS.length - 1 && (
+                <div className="w-2.5 h-2.5 rounded-full bg-blue-400 flex-shrink-0" />
+                {idx < log.length - 1 && (
                   <div className="w-px flex-1 bg-white/15 min-h-[14px]" />
                 )}
               </div>
@@ -303,9 +278,9 @@ export function SourceControlPanel({
                 <span className="text-[13px] text-gray-200 truncate block">{commit.message}</span>
                 <div className="flex items-center gap-2 mt-0.5">
                   <span className="text-[11px] text-gray-500">{commit.author}</span>
-                  {commit.branch && (
-                    <span className="text-[9px] bg-blue-500/20 text-blue-400 px-1.5 py-0 rounded font-medium">{commit.branch}</span>
-                  )}
+                  {commit.branches.length > 0 && commit.branches.map((br) => (
+                    <span key={br} className="text-[9px] bg-blue-500/20 text-blue-400 px-1.5 py-0 rounded font-medium">{br}</span>
+                  ))}
                 </div>
               </div>
             </div>

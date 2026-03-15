@@ -371,8 +371,6 @@ export default function App() {
     }
   };
 
-  const reviewSession = sessions.find(s => s.id === reviewSessionId) || null;
-
   return (
     <div className="w-screen h-screen overflow-hidden bg-[#1A1A2E] text-white font-sans flex flex-col relative">
       {/* Background Image */}
@@ -453,7 +451,6 @@ export default function App() {
 
         <GitReviewPanel
           isOpen={!!reviewSessionId}
-          session={reviewSession}
           onClose={() => setReviewSessionId(null)}
           onCommit={handleCommit}
           onDiscard={handleDiscard}

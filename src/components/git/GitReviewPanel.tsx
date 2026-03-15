@@ -1,55 +1,33 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Session, FileDiff, GitDiff } from '../../types';
+import type { FileChange } from '../../types/git';
+import { useGit } from '../../contexts/GitProvider';
 import { SourceControlPanel } from './SourceControlPanel';
 import { DiffPanel } from './DiffPanel';
+import type { FileDiff } from '../../types';
 
 interface GitReviewPanelProps {
   isOpen: boolean;
-  session: Session | null;
   onClose: () => void;
   onCommit: (message: string) => void;
   onDiscard: () => void;
 }
 
-function generateCommitMessage(diff: GitDiff): string {
-  const parts = diff.files.map(file => {
-    const name = file.filename.split('/').pop() || file.filename;
-    if (file.status === 'M') return `update ${name} (+${file.additions} -${file.deletions})`;
-    if (file.status === 'A') return `add ${name} (+${file.additions})`;
-    return `remove ${name} (-${file.deletions})`;
-  });
-
-  const prefix = diff.files.some(f => f.status === 'D') ? 'refactor' :
-                 diff.files.some(f => f.status === 'A') ? 'feat' : 'fix';
-
-  return `${prefix}: ${parts.join(', ')}`;
-}
-
-export function GitReviewPanel({ isOpen, session, onClose, onCommit, onDiscard }: GitReviewPanelProps) {
+export function GitReviewPanel({ isOpen, onClose, onCommit, onDiscard }: GitReviewPanelProps) {
+  const { changes, info } = useGit();
   const [commitMessage, setCommitMessage] = useState('');
-  const [selectedFile, setSelectedFile] = useState<FileDiff | null>(null);
+  const [selectedChange, setSelectedChange] = useState<FileChange | null>(null);
   const [isGeneratingCommit, setIsGeneratingCommit] = useState(false);
-  const [cachedSession, setCachedSession] = useState<Session | null>(null);
-
-  // Cache session for close animation
-  useEffect(() => {
-    if (isOpen && session && session.diff) {
-      setCachedSession(session);
-    }
-  }, [isOpen, session]);
 
   // Clear state when panel closes
   useEffect(() => {
     if (!isOpen) {
       const timer = setTimeout(() => {
-        setSelectedFile(null);
+        setSelectedChange(null);
         setCommitMessage('');
       }, 300);
       return () => clearTimeout(timer);
     }
   }, [isOpen]);
-
-  const displaySession = (isOpen && session?.diff) ? session : cachedSession;
 
   const handleCommit = useCallback(() => {
     if (commitMessage.trim()) {
@@ -59,21 +37,38 @@ export function GitReviewPanel({ isOpen, session, onClose, onCommit, onDiscard }
   }, [commitMessage, onCommit]);
 
   const handleGenerateCommitMessage = useCallback(async () => {
-    if (!displaySession?.diff) return;
+    if (changes.length === 0) return;
     setIsGeneratingCommit(true);
     await new Promise(resolve => setTimeout(resolve, 500));
-    const msg = generateCommitMessage(displaySession.diff);
-    setCommitMessage(msg);
+    // Simple commit message generation from changes
+    const parts = changes.map(file => {
+      const name = file.path.split('/').pop() || file.path;
+      if (file.status === 'M') return `update ${name} (+${file.additions} -${file.deletions})`;
+      if (file.status === 'A') return `add ${name} (+${file.additions})`;
+      return `remove ${name} (-${file.deletions})`;
+    });
+    const prefix = changes.some(f => f.status === 'D') ? 'refactor' :
+                   changes.some(f => f.status === 'A') ? 'feat' : 'fix';
+    setCommitMessage(`${prefix}: ${parts.join(', ')}`);
     setIsGeneratingCommit(false);
-  }, [displaySession]);
+  }, [changes]);
 
-  const handleSelectFile = useCallback((file: FileDiff) => {
-    setSelectedFile(prev => prev?.filename === file.filename ? null : file);
+  const handleSelectFile = useCallback((file: FileChange) => {
+    setSelectedChange(prev => prev?.path === file.path ? null : file);
   }, []);
+
+  // Convert FileChange to FileDiff for DiffPanel compatibility
+  const selectedFileDiff: FileDiff | null = selectedChange ? {
+    filename: selectedChange.path,
+    status: selectedChange.status as 'M' | 'A' | 'D',
+    additions: selectedChange.additions,
+    deletions: selectedChange.deletions,
+    patch: '',
+  } : null;
 
   return (
     <>
-      {/* Backdrop — 样式1: bg-black/50 */}
+      {/* Backdrop */}
       <div
         className={`fixed inset-0 z-50 bg-black/50 transition-opacity duration-300 ease-in-out ${
           isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
@@ -87,24 +82,23 @@ export function GitReviewPanel({ isOpen, session, onClose, onCommit, onDiscard }
       }`}>
         {/* Diff Panel (left side, only when file selected) */}
         <div className={`transition-all duration-300 ease-out overflow-hidden ${
-          selectedFile ? 'w-[calc(100vw-420px)]' : 'w-0'
+          selectedFileDiff ? 'w-[calc(100vw-420px)]' : 'w-0'
         }`}>
-          {selectedFile && (
-            <DiffPanel file={selectedFile} onClose={() => setSelectedFile(null)} />
+          {selectedFileDiff && (
+            <DiffPanel file={selectedFileDiff} onClose={() => setSelectedChange(null)} />
           )}
         </div>
 
         {/* Source Control Panel (right side) */}
-        {displaySession && displaySession.diff && (
+        {changes.length > 0 && (
           <SourceControlPanel
-            session={displaySession}
             commitMessage={commitMessage}
             onCommitMessageChange={setCommitMessage}
             onCommit={handleCommit}
             onDiscard={onDiscard}
             onClose={onClose}
             onSelectFile={handleSelectFile}
-            selectedFile={selectedFile}
+            selectedFile={selectedChange}
             onGenerateCommitMessage={handleGenerateCommitMessage}
             isGeneratingCommit={isGeneratingCommit}
           />
