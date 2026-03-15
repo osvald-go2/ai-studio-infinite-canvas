@@ -4,7 +4,9 @@ import { Session, Message, ContentBlock } from '../types';
 import { generateMockDiff } from '../services/mockGit';
 import { MessageRenderer } from './message/MessageRenderer';
 import { STRUCTURED_MOCK_RESPONSES } from '../utils/mockResponses';
+import { backend } from '../services/backend';
 
+const isElectron = typeof window !== 'undefined' && window.aiBackend !== undefined;
 let mockResponseIndex = 0;
 
 export function SessionWindow({
@@ -31,11 +33,14 @@ export function SessionWindow({
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState('');
+  const [backendSessionId, setBackendSessionId] = useState<string | null>(null);
 
   const isStreamingRef = useRef(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const sessionRef = useRef(session);
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const backendSessionIdRef = useRef<string | null>(null);
+  const streamingMessageIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -54,12 +59,93 @@ export function SessionWindow({
     scrollToBottom();
   }, [session.messages, isStreaming]);
 
+  // Backend event listeners for Electron mode
+  useEffect(() => {
+    if (!isElectron) return;
+
+    const blockMap = new Map<number, ContentBlock>();
+
+    const handleBlockStart = (data: { session_id: string; block_index: number; block: ContentBlock }) => {
+      if (data.session_id !== backendSessionIdRef.current) return;
+      blockMap.set(data.block_index, { ...data.block });
+      updateAssistantBlocks(blockMap);
+    };
+
+    const handleBlockDelta = (data: { session_id: string; block_index: number; delta: any }) => {
+      if (data.session_id !== backendSessionIdRef.current) return;
+      const block = blockMap.get(data.block_index);
+      if (!block) return;
+
+      if (block.type === 'text' && data.delta.content) {
+        (block as any).content += data.delta.content;
+      } else if (block.type === 'code' && data.delta.content) {
+        (block as any).code += data.delta.content;
+      } else if (block.type === 'tool_call' && data.delta.args) {
+        (block as any).args += data.delta.args;
+      }
+      blockMap.set(data.block_index, { ...block });
+      updateAssistantBlocks(blockMap);
+    };
+
+    const handleBlockStop = (data: { session_id: string; block_index: number }) => {
+      if (data.session_id !== backendSessionIdRef.current) return;
+      const block = blockMap.get(data.block_index);
+      if (block && block.type === 'tool_call') {
+        (block as any).status = 'done';
+        blockMap.set(data.block_index, { ...block });
+        updateAssistantBlocks(blockMap);
+      }
+    };
+
+    const handleMessageComplete = (data: { session_id: string }) => {
+      if (data.session_id !== backendSessionIdRef.current) return;
+      setIsStreaming(false);
+      setStreamingMessageId(null);
+      streamingMessageIdRef.current = null;
+      isStreamingRef.current = false;
+      blockMap.clear();
+    };
+
+    const handleMessageError = (data: { session_id: string; error: { code: number; message: string } }) => {
+      if (data.session_id !== backendSessionIdRef.current) return;
+      setIsStreaming(false);
+      setStreamingMessageId(null);
+      streamingMessageIdRef.current = null;
+      isStreamingRef.current = false;
+      blockMap.clear();
+      console.error('[backend error]', data.error);
+    };
+
+    const updateAssistantBlocks = (blocks: Map<number, ContentBlock>) => {
+      const sortedBlocks = Array.from(blocks.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([_, block]) => block);
+
+      const updated = {
+        ...sessionRef.current,
+        messages: sessionRef.current.messages.map(m =>
+          m.id === streamingMessageIdRef.current
+            ? { ...m, blocks: sortedBlocks }
+            : m
+        ),
+      };
+      sessionRef.current = updated;
+      onUpdate(updated);
+    };
+
+    backend.onBlockStart(handleBlockStart);
+    backend.onBlockDelta(handleBlockDelta);
+    backend.onBlockStop(handleBlockStop);
+    backend.onMessageComplete(handleMessageComplete);
+    backend.onMessageError(handleMessageError);
+  }, []);
+
   useEffect(() => {
     // Auto-trigger AI response if the session was just created with an initial prompt
     if (session.messages.length === 1 && session.messages[0].role === 'user' && !isStreamingRef.current) {
       const triggerInitialResponse = async () => {
         const aiMsgId = (Date.now() + 1).toString();
-        const mockResponse = STRUCTURED_MOCK_RESPONSES[mockResponseIndex++ % STRUCTURED_MOCK_RESPONSES.length];
+        const initialText = session.messages[0].content;
 
         const aiMsg: Message = {
           id: aiMsgId,
@@ -81,18 +167,38 @@ export function SessionWindow({
 
         setIsStreaming(true);
         setStreamingMessageId(aiMsgId);
+        streamingMessageIdRef.current = aiMsgId;
         isStreamingRef.current = true;
 
-        await streamBlockResponse(aiMsgId, mockResponse.blocks);
+        if (isElectron) {
+          if (!backendSessionIdRef.current) {
+            const sid = await backend.createSession(session.model);
+            backendSessionIdRef.current = sid;
+            setBackendSessionId(sid);
+          }
+          try {
+            await backend.sendMessage(backendSessionIdRef.current, initialText);
+          } catch (e) {
+            setIsStreaming(false);
+            setStreamingMessageId(null);
+            streamingMessageIdRef.current = null;
+            isStreamingRef.current = false;
+            console.error('[initial send error]', e);
+          }
+        } else {
+          const mockResponse = STRUCTURED_MOCK_RESPONSES[mockResponseIndex++ % STRUCTURED_MOCK_RESPONSES.length];
+          await streamBlockResponse(aiMsgId, mockResponse.blocks);
 
           setIsStreaming(false);
           setStreamingMessageId(null);
+          streamingMessageIdRef.current = null;
           isStreamingRef.current = false;
           onUpdate({
             ...sessionRef.current,
             status: 'review',
             diff: generateMockDiff()
           });
+        }
       };
 
       triggerInitialResponse();
@@ -110,8 +216,6 @@ export function SessionWindow({
     };
 
     const aiMsgId = (Date.now() + 1).toString();
-    const mockResponse = STRUCTURED_MOCK_RESPONSES[mockResponseIndex++ % STRUCTURED_MOCK_RESPONSES.length];
-
     const aiMsg: Message = {
       id: aiMsgId,
       role: 'assistant',
@@ -130,21 +234,45 @@ export function SessionWindow({
     sessionRef.current = updatedSession;
     onUpdate(updatedSession);
 
+    const currentInput = inputValue;
     setInputValue('');
     setIsStreaming(true);
     setStreamingMessageId(aiMsgId);
+    streamingMessageIdRef.current = aiMsgId;
     isStreamingRef.current = true;
 
-    await streamBlockResponse(aiMsgId, mockResponse.blocks);
+    if (isElectron) {
+      // Create backend session if not already created
+      if (!backendSessionIdRef.current) {
+        const sid = await backend.createSession(session.model);
+        backendSessionIdRef.current = sid;
+        setBackendSessionId(sid);
+      }
+      // Send to backend — events will update UI via the useEffect listeners
+      try {
+        await backend.sendMessage(backendSessionIdRef.current, currentInput);
+      } catch (e) {
+        setIsStreaming(false);
+        setStreamingMessageId(null);
+        streamingMessageIdRef.current = null;
+        isStreamingRef.current = false;
+        console.error('[send error]', e);
+      }
+    } else {
+      // Mock fallback for browser dev
+      const mockResponse = STRUCTURED_MOCK_RESPONSES[mockResponseIndex++ % STRUCTURED_MOCK_RESPONSES.length];
+      await streamBlockResponse(aiMsgId, mockResponse.blocks);
 
-    setIsStreaming(false);
-    setStreamingMessageId(null);
-    isStreamingRef.current = false;
-    onUpdate({
-      ...sessionRef.current,
-      status: 'review',
-      diff: generateMockDiff()
-    });
+      setIsStreaming(false);
+      setStreamingMessageId(null);
+      streamingMessageIdRef.current = null;
+      isStreamingRef.current = false;
+      onUpdate({
+        ...sessionRef.current,
+        status: 'review',
+        diff: generateMockDiff()
+      });
+    }
   };
 
   const streamBlockResponse = async (aiMsgId: string, blocks: ContentBlock[]) => {
