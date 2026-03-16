@@ -1,6 +1,6 @@
 use super::Database;
 
-const CURRENT_VERSION: i64 = 2;
+const CURRENT_VERSION: i64 = 3;
 
 pub fn run(db: &Database) -> Result<(), String> {
     let conn = db.conn();
@@ -17,6 +17,18 @@ pub fn run(db: &Database) -> Result<(), String> {
         migrate_v2(&conn)?;
     }
 
+    if version < 3 {
+        migrate_v3(&conn)?;
+    }
+
+    Ok(())
+}
+
+fn migrate_v3(conn: &rusqlite::Connection) -> Result<(), String> {
+    conn.execute_batch("
+        ALTER TABLE sessions ADD COLUMN codex_thread_id TEXT DEFAULT NULL;
+        PRAGMA user_version = 3;
+    ").map_err(|e| format!("migration v3 failed: {e}"))?;
     Ok(())
 }
 
@@ -103,7 +115,7 @@ mod tests {
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
     }
 
     #[test]
@@ -114,6 +126,16 @@ mod tests {
         let version: i64 = db.conn()
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
+    }
+
+    #[test]
+    fn test_v3_migration_adds_codex_thread_id() {
+        let db = Database::open_memory().unwrap();
+        let conn = db.conn();
+        let has_column: bool = conn
+            .prepare("SELECT codex_thread_id FROM sessions LIMIT 0")
+            .is_ok();
+        assert!(has_column, "codex_thread_id column should exist after migration");
     }
 }

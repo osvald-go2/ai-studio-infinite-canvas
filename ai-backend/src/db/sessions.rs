@@ -22,14 +22,15 @@ fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<DbSession> {
         created_at: row.get(11)?,
         updated_at: row.get(12)?,
         claude_session_id: row.get(13)?,
+        codex_thread_id: row.get(14)?,
     })
 }
 
 pub fn create(db: &Database, session: &DbSession) -> Result<(), String> {
     let conn = db.conn();
     conn.execute(
-        "INSERT INTO sessions (id, project_id, title, model, status, position_x, position_y, height, git_branch, worktree, messages, created_at, updated_at, claude_session_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        "INSERT INTO sessions (id, project_id, title, model, status, position_x, position_y, height, git_branch, worktree, messages, created_at, updated_at, claude_session_id, codex_thread_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             session.id,
             session.project_id,
@@ -45,6 +46,7 @@ pub fn create(db: &Database, session: &DbSession) -> Result<(), String> {
             session.created_at,
             session.updated_at,
             session.claude_session_id,
+            session.codex_thread_id,
         ],
     )
     .map_err(|e| format!("failed to create session: {e}"))?;
@@ -54,7 +56,7 @@ pub fn create(db: &Database, session: &DbSession) -> Result<(), String> {
 pub fn get_by_id(db: &Database, id: &str) -> Result<Option<DbSession>, String> {
     let conn = db.conn();
     conn.query_row(
-        "SELECT id, project_id, title, model, status, position_x, position_y, height, git_branch, worktree, messages, created_at, updated_at, claude_session_id
+        "SELECT id, project_id, title, model, status, position_x, position_y, height, git_branch, worktree, messages, created_at, updated_at, claude_session_id, codex_thread_id
          FROM sessions WHERE id = ?1",
         params![id],
         row_to_session,
@@ -67,7 +69,7 @@ pub fn list_by_project(db: &Database, project_id: i64) -> Result<Vec<DbSession>,
     let conn = db.conn();
     let mut stmt = conn
         .prepare(
-            "SELECT id, project_id, title, model, status, position_x, position_y, height, git_branch, worktree, messages, created_at, updated_at, claude_session_id
+            "SELECT id, project_id, title, model, status, position_x, position_y, height, git_branch, worktree, messages, created_at, updated_at, claude_session_id, codex_thread_id
              FROM sessions WHERE project_id = ?1 ORDER BY created_at ASC",
         )
         .map_err(|e| format!("failed to prepare list query: {e}"))?;
@@ -84,8 +86,8 @@ pub fn list_by_project(db: &Database, project_id: i64) -> Result<Vec<DbSession>,
 pub fn update(db: &Database, session: &DbSession) -> Result<(), String> {
     let conn = db.conn();
     conn.execute(
-        "UPDATE sessions SET project_id = ?1, title = ?2, model = ?3, status = ?4, position_x = ?5, position_y = ?6, height = ?7, git_branch = ?8, worktree = ?9, messages = ?10, claude_session_id = ?11, updated_at = ?12
-         WHERE id = ?13",
+        "UPDATE sessions SET project_id = ?1, title = ?2, model = ?3, status = ?4, position_x = ?5, position_y = ?6, height = ?7, git_branch = ?8, worktree = ?9, messages = ?10, claude_session_id = ?11, codex_thread_id = ?12, updated_at = ?13
+         WHERE id = ?14",
         params![
             session.project_id,
             session.title,
@@ -98,6 +100,7 @@ pub fn update(db: &Database, session: &DbSession) -> Result<(), String> {
             session.worktree,
             session.messages,
             session.claude_session_id,
+            session.codex_thread_id,
             now(),
             session.id,
         ],
@@ -169,6 +172,7 @@ mod tests {
             created_at: now(),
             updated_at: now(),
             claude_session_id: None,
+            codex_thread_id: None,
         }
     }
 
@@ -257,6 +261,17 @@ mod tests {
 
         let gone = get_by_id(&db, &session_id).unwrap();
         assert!(gone.is_none());
+    }
+
+    #[test]
+    fn test_codex_thread_id_persistence() {
+        let (db, project_id) = setup();
+        let mut session = make_session(project_id);
+        session.codex_thread_id = Some("thread_abc123".to_string());
+        let session_id = session.id.clone();
+        create(&db, &session).unwrap();
+        let fetched = get_by_id(&db, &session_id).unwrap().unwrap();
+        assert_eq!(fetched.codex_thread_id, Some("thread_abc123".to_string()));
     }
 
     #[test]
