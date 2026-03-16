@@ -7,7 +7,7 @@ export type ContentBlock =
   | { type: 'todolist'; items: TodoItem[] }
   | { type: 'subagent'; agentId: string; task: string; status: 'launched' | 'working' | 'done' | 'error'; summary?: string; blocks?: ContentBlock[] }
   | { type: 'askuser'; questions: AskUserQuestion[]; submitted?: boolean }
-  | { type: 'skill'; skill: string; args?: string; status: 'invoking' | 'done'; duration?: number }
+  | { type: 'skill'; skill: string; args?: string; status: 'invoking' | 'done' | 'error'; duration?: number }
   | { type: 'file_changes'; title: string; files: FileChangeItem[] }
   | { type: 'form_table'; title?: string; columns: FormTableColumn[]; rows: Record<string, string>[]; submitLabel?: string };
 
@@ -59,6 +59,13 @@ export interface Session {
   height?: number;
   prevHeight?: number;
   claudeSessionId?: string;
+  codexThreadId?: string;
+}
+
+export function getAgentType(model: string): 'claude' | 'codex' {
+  if (model.startsWith('claude')) return 'claude';
+  if (model === 'codex') return 'codex';
+  return 'claude';
 }
 
 export interface DbProject {
@@ -88,6 +95,7 @@ export interface DbSession {
   created_at: string;
   updated_at: string;
   claude_session_id: string | null;
+  codex_thread_id: string | null;
 }
 
 export interface SkillInfo {

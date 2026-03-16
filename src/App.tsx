@@ -156,6 +156,7 @@ export default function App() {
         gitBranch: s.git_branch ?? undefined,
         worktree: s.worktree ?? undefined,
         claudeSessionId: s.claude_session_id || undefined,
+        codexThreadId: s.codex_thread_id || undefined,
         messages: JSON.parse(s.messages),
       };
     });
@@ -192,6 +193,7 @@ export default function App() {
         created_at: sessionCreatedAtRef.current[session.id],
         updated_at: now,
         claude_session_id: session.claudeSessionId ?? null,
+        codex_thread_id: session.codexThreadId ?? null,
       };
       return backend.saveSession(dbSession);
     }));
@@ -202,27 +204,39 @@ export default function App() {
     if (isSwitchingProject) return;
     if (currentProject?.id === projectId) return;
 
+    const target = projects.find(p => p.id === projectId);
+    if (!target) return;
+
     setIsSwitchingProject(true);
+
+    // Phase 1: Immediately clear UI so the user sees a responsive switch
+    const prevProject = currentProject;
+    const prevSessions = sessions;
+    const prevViewMode = viewMode;
+    const prevTransform = canvasTransform;
+
+    setSessions([]);
+    setCurrentProject(null);
+    setProjectDir(target.path);
+
+    // Phase 2a: Save old project in background (fire-and-forget)
+    if (prevProject) {
+      Promise.all([
+        backend.updateProject({
+          ...prevProject,
+          view_mode: prevViewMode,
+          canvas_x: prevTransform.x,
+          canvas_y: prevTransform.y,
+          canvas_zoom: prevTransform.scale,
+        }),
+        flushSessionSaves(prevSessions, prevProject.id),
+      ]).catch(err => console.warn('Background save failed:', err));
+    }
+
+    // Phase 2b: Load new project
     try {
-      // Save current project state
-      if (currentProject) {
-        await backend.updateProject({
-          ...currentProject,
-          view_mode: viewMode,
-          canvas_x: canvasTransform.x,
-          canvas_y: canvasTransform.y,
-          canvas_zoom: canvasTransform.scale,
-        });
-        await flushSessionSaves(sessions, currentProject.id);
-      }
-
-      // Find target project and open it
-      const target = projects.find(p => p.id === projectId);
-      if (!target) return;
-
       const project = await backend.openProject(target.path);
       if (!project) return;
-
       await applyProject(project);
     } catch (e) {
       console.error('Failed to switch project:', e);
@@ -252,7 +266,7 @@ export default function App() {
 
   // Auto-save sessions to backend (debounced)
   useEffect(() => {
-    if (!isElectronApp || !currentProject) return;
+    if (!isElectronApp || !currentProject || isSwitchingProject) return;
 
     const saveTimeout = setTimeout(() => {
       const now = new Date().toISOString();
@@ -275,6 +289,7 @@ export default function App() {
           created_at: sessionCreatedAtRef.current[session.id],
           updated_at: now,
           claude_session_id: session.claudeSessionId ?? null,
+          codex_thread_id: session.codexThreadId ?? null,
         };
         backend.saveSession(dbSession).catch(console.error);
       });
@@ -282,6 +297,32 @@ export default function App() {
 
     return () => clearTimeout(saveTimeout);
   }, [sessions, currentProject]);
+
+  // Refs to access latest state in before-quit handler
+  const sessionsRef = useRef(sessions);
+  const currentProjectRef = useRef(currentProject);
+  sessionsRef.current = sessions;
+  currentProjectRef.current = currentProject;
+
+  // Flush session saves before app quit
+  useEffect(() => {
+    if (!isElectronApp) return;
+    const aiBackend = (window as any).aiBackend;
+    if (!aiBackend.onBeforeQuit) return;
+
+    aiBackend.onBeforeQuit(async () => {
+      const proj = currentProjectRef.current;
+      const sess = sessionsRef.current;
+      if (proj) {
+        try {
+          await flushSessionSaves(sess, proj.id);
+        } catch (e) {
+          console.error('Emergency flush failed:', e);
+        }
+      }
+      aiBackend.notifyFlushComplete();
+    });
+  }, [flushSessionSaves]);
 
   // Persist view mode changes
   useEffect(() => {
@@ -359,6 +400,7 @@ export default function App() {
         created_at: now,
         updated_at: now,
         claude_session_id: newSession.claudeSessionId ?? null,
+        codex_thread_id: newSession.codexThreadId ?? null,
       };
       backend.saveSession(dbSession).catch(console.error);
     }

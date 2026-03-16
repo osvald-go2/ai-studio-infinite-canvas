@@ -86,6 +86,7 @@ export function SessionWindow({
   const streamingMessageIdRef = useRef<string | null>(null);
   const inputValueRef = useRef('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const prevMsgLenRef = useRef(session.messages.length);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -158,14 +159,23 @@ export function SessionWindow({
       updateAssistantBlocks(blockMap);
     };
 
-    const handleBlockStop = (data: { session_id: string; block_index: number }) => {
+    const handleBlockStop = (data: { session_id: string; block_index: number; status?: 'done' | 'error' }) => {
       if (data.session_id !== backendSessionIdRef.current) return;
       const block = blockMap.get(data.block_index);
-      if (block && block.type === 'tool_call') {
-        (block as any).status = 'done';
-        blockMap.set(data.block_index, { ...block });
-        updateAssistantBlocks(blockMap);
+      if (!block) return;
+
+      const resolvedStatus = data.status || 'done';
+
+      if (block.type === 'tool_call') {
+        (block as any).status = resolvedStatus;
+      } else if (block.type === 'subagent') {
+        (block as any).status = resolvedStatus;
+      } else if (block.type === 'skill') {
+        (block as any).status = resolvedStatus === 'error' ? 'error' : 'done';
       }
+
+      blockMap.set(data.block_index, { ...block });
+      updateAssistantBlocks(blockMap);
     };
 
     const handleMessageComplete = async (data: { session_id: string }) => {
@@ -233,12 +243,11 @@ export function SessionWindow({
     backend.onMessageComplete(handleMessageComplete);
     backend.onMessageError(handleMessageError);
 
-    const handleSessionInit = (data: { session_id: string; claude_session_id: string }) => {
+    const handleSessionInit = (data: { session_id: string; claude_session_id?: string; codex_thread_id?: string; agent?: string }) => {
       if (data.session_id === backendSessionIdRef.current) {
-        const updated = {
-          ...sessionRef.current,
-          claudeSessionId: data.claude_session_id,
-        };
+        const updated = data.agent === 'codex'
+          ? { ...sessionRef.current, codexThreadId: data.codex_thread_id }
+          : { ...sessionRef.current, claudeSessionId: data.claude_session_id };
         sessionRef.current = updated;
         onUpdate(updated);
       }
@@ -253,6 +262,11 @@ export function SessionWindow({
 
     return () => {
       if (isElectron()) {
+        window.aiBackend.off('block.start', handleBlockStart);
+        window.aiBackend.off('block.delta', handleBlockDelta);
+        window.aiBackend.off('block.stop', handleBlockStop);
+        window.aiBackend.off('message.complete', handleMessageComplete);
+        window.aiBackend.off('message.error', handleMessageError);
         window.aiBackend.off('session.init', handleSessionInit);
         window.aiBackend.off('sidecar.restarted', handleSidecarRestarted);
       }
@@ -291,7 +305,11 @@ export function SessionWindow({
 
         if (isElectron()) {
           if (!backendSessionIdRef.current) {
-            const sid = await backend.createSession(session.model, sessionRef.current.claudeSessionId);
+            const sid = await backend.createSession(session.model,
+              sessionRef.current.model === 'codex'
+                ? { codexThreadId: sessionRef.current.codexThreadId }
+                : { claudeSessionId: sessionRef.current.claudeSessionId }
+            );
             backendSessionIdRef.current = sid;
             setBackendSessionId(sid);
           }
@@ -323,13 +341,110 @@ export function SessionWindow({
     }
   }, []); // Run on mount
 
-  const handleSend = async () => {
-    if (!inputValue.trim() || isStreaming) return;
+  // Auto-trigger AI response for externally added user messages (e.g., broadcast)
+  useEffect(() => {
+    const prevLen = prevMsgLenRef.current;
+    const curLen = session.messages.length;
+    prevMsgLenRef.current = curLen;
+
+    if (curLen > prevLen && !isStreamingRef.current) {
+      const lastMsg = session.messages[curLen - 1];
+      if (lastMsg.role === 'user') {
+        const triggerBroadcastResponse = async () => {
+          const aiMsgId = (Date.now() + 1).toString();
+          const aiMsg: Message = {
+            id: aiMsgId,
+            role: 'assistant',
+            content: '',
+            type: 'text',
+            blocks: []
+          };
+
+          const updatedMessages = [...sessionRef.current.messages, aiMsg];
+          const updatedSession = {
+            ...sessionRef.current,
+            status: 'inprocess' as const,
+            messages: updatedMessages
+          };
+
+          sessionRef.current = updatedSession;
+          onUpdate(updatedSession);
+
+          setIsStreaming(true);
+          setStreamingMessageId(aiMsgId);
+          streamingMessageIdRef.current = aiMsgId;
+          isStreamingRef.current = true;
+
+          if (isElectron()) {
+            if (!backendSessionIdRef.current) {
+              const sid = await backend.createSession(session.model,
+              sessionRef.current.model === 'codex'
+                ? { codexThreadId: sessionRef.current.codexThreadId }
+                : { claudeSessionId: sessionRef.current.claudeSessionId }
+            );
+              backendSessionIdRef.current = sid;
+              setBackendSessionId(sid);
+            }
+            try {
+              await backend.sendMessage(backendSessionIdRef.current!, lastMsg.content);
+            } catch (e) {
+              console.warn('[broadcast send error, attempting resume]', e);
+              backendSessionIdRef.current = null;
+              setBackendSessionId(null);
+              try {
+                const sid = await backend.createSession(session.model,
+              sessionRef.current.model === 'codex'
+                ? { codexThreadId: sessionRef.current.codexThreadId }
+                : { claudeSessionId: sessionRef.current.claudeSessionId }
+            );
+                backendSessionIdRef.current = sid;
+                setBackendSessionId(sid);
+                await backend.sendMessage(sid, lastMsg.content);
+              } catch (retryError) {
+                setIsStreaming(false);
+                setStreamingMessageId(null);
+                streamingMessageIdRef.current = null;
+                isStreamingRef.current = false;
+                console.error('[broadcast send retry failed]', retryError);
+                const errorMsg = retryError instanceof Error ? retryError.message : 'Unknown error';
+                const updated = {
+                  ...sessionRef.current,
+                  status: 'review' as const,
+                  messages: sessionRef.current.messages.map(m =>
+                    m.id === aiMsgId ? { ...m, blocks: [{ type: 'text' as const, content: `Connection failed: ${errorMsg}. Please try again.` }] } : m
+                  ),
+                };
+                sessionRef.current = updated;
+                onUpdate(updated);
+              }
+            }
+          } else {
+            const mockResponse = STRUCTURED_MOCK_RESPONSES[mockResponseIndex++ % STRUCTURED_MOCK_RESPONSES.length];
+            await streamBlockResponse(aiMsgId, mockResponse.blocks);
+
+            setIsStreaming(false);
+            setStreamingMessageId(null);
+            streamingMessageIdRef.current = null;
+            isStreamingRef.current = false;
+            onUpdate({
+              ...sessionRef.current,
+              status: 'review',
+            });
+          }
+        };
+
+        triggerBroadcastResponse();
+      }
+    }
+  }, [session.messages.length]);
+
+  const sendMessage = async (text: string) => {
+    if (!text.trim() || isStreaming) return;
 
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: inputValue,
+      content: text,
       type: 'text',
       timestamp: Date.now()
     };
@@ -353,12 +468,6 @@ export function SessionWindow({
     sessionRef.current = updatedSession;
     onUpdate(updatedSession);
 
-    const currentInput = inputValue;
-    setInputValue('');
-    inputValueRef.current = '';
-    setSelectedSkill(null);
-    setSkills([]);
-    setPickerOpen(false);
     setIsStreaming(true);
     setStreamingMessageId(aiMsgId);
     streamingMessageIdRef.current = aiMsgId;
@@ -367,22 +476,30 @@ export function SessionWindow({
     if (isElectron()) {
       // Create backend session if not already created
       if (!backendSessionIdRef.current) {
-        const sid = await backend.createSession(session.model, sessionRef.current.claudeSessionId);
+        const sid = await backend.createSession(session.model,
+              sessionRef.current.model === 'codex'
+                ? { codexThreadId: sessionRef.current.codexThreadId }
+                : { claudeSessionId: sessionRef.current.claudeSessionId }
+            );
         backendSessionIdRef.current = sid;
         setBackendSessionId(sid);
       }
       // Send to backend — events will update UI via the useEffect listeners
       try {
-        await backend.sendMessage(backendSessionIdRef.current, currentInput);
+        await backend.sendMessage(backendSessionIdRef.current, text);
       } catch (e) {
         console.warn('[send error, attempting resume]', e);
         backendSessionIdRef.current = null;
         setBackendSessionId(null);
         try {
-          const sid = await backend.createSession(session.model, sessionRef.current.claudeSessionId);
+          const sid = await backend.createSession(session.model,
+              sessionRef.current.model === 'codex'
+                ? { codexThreadId: sessionRef.current.codexThreadId }
+                : { claudeSessionId: sessionRef.current.claudeSessionId }
+            );
           backendSessionIdRef.current = sid;
           setBackendSessionId(sid);
-          await backend.sendMessage(sid, currentInput);
+          await backend.sendMessage(sid, text);
         } catch (retryError) {
           setIsStreaming(false);
           setStreamingMessageId(null);
@@ -416,6 +533,17 @@ export function SessionWindow({
         status: 'review',
       });
     }
+  };
+
+  const handleSend = async () => {
+    if (!inputValue.trim() || isStreaming) return;
+    const text = inputValue;
+    setInputValue('');
+    inputValueRef.current = '';
+    setSelectedSkill(null);
+    setSkills([]);
+    setPickerOpen(false);
+    await sendMessage(text);
   };
 
   const streamBlockResponse = async (aiMsgId: string, blocks: ContentBlock[]) => {
@@ -528,7 +656,7 @@ export function SessionWindow({
     const isFirstMessage = session.messages.length === 0;
     console.log(`[SessionWindow] handleInputChange: val="${val}", isFirstMessage=${isFirstMessage}, skills.length=${skills.length}, model=${session.model}, projectDir=${projectDir}`);
 
-    if (isFirstMessage && val.startsWith('/') && val.length >= 1) {
+    if (val.startsWith('/') && val.length >= 1) {
       let currentSkills = skills;
       if (currentSkills.length === 0) {
         currentSkills = await scanSkills(session.model, projectDir);
@@ -887,6 +1015,7 @@ export function SessionWindow({
                             blocks={msg.blocks}
                             fallbackContent={msg.content}
                             isStreaming={isMsgStreaming}
+                            onSendMessage={sendMessage}
                           />
                         </>
                       )}

@@ -5,13 +5,14 @@ function isElectron(): boolean {
 }
 
 export const backend = {
-  async createSession(model: string, claudeSessionId?: string): Promise<string> {
+  async createSession(model: string, opts?: { claudeSessionId?: string; codexThreadId?: string }): Promise<string> {
     if (!isElectron()) {
       return `mock-${Date.now()}`;
     }
     const result = await window.aiBackend.invoke('session.create', {
       model,
-      claude_session_id: claudeSessionId,
+      claude_session_id: opts?.claudeSessionId,
+      codex_thread_id: opts?.codexThreadId,
     });
     return result.session_id;
   },
@@ -71,7 +72,7 @@ export const backend = {
     window.aiBackend.on('block.delta', callback);
   },
 
-  onBlockStop(callback: (data: { session_id: string; block_index: number }) => void): void {
+  onBlockStop(callback: (data: { session_id: string; block_index: number; status?: 'done' | 'error' }) => void): void {
     if (!isElectron()) return;
     window.aiBackend.on('block.stop', callback);
   },
@@ -86,7 +87,7 @@ export const backend = {
     window.aiBackend.on('message.error', callback);
   },
 
-  onSessionInit(callback: (data: { session_id: string; claude_session_id: string }) => void): void {
+  onSessionInit(callback: (data: { session_id: string; claude_session_id?: string; codex_thread_id?: string; agent?: string }) => void): void {
     if (!isElectron()) return;
     window.aiBackend.on('session.init', callback);
   },
