@@ -1,4 +1,5 @@
 use std::io::{self, Write};
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
 
@@ -7,6 +8,7 @@ mod protocol;
 mod router;
 mod session;
 mod claude;
+mod codex;
 mod normalizer;
 mod git;
 
@@ -16,18 +18,20 @@ use session::manager::SessionManager;
 
 #[tokio::main]
 async fn main() {
-    let mut session_manager = SessionManager::new();
+    let session_manager = Arc::new(SessionManager::new());
 
     // Read API key from env if available
     if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
         session_manager.set_api_key(key);
     }
 
-    let database = db::Database::open_default()
-        .expect("failed to initialize database");
+    let database = Arc::new(
+        db::Database::open_default()
+            .expect("failed to initialize database"),
+    );
     eprintln!("[ai-backend] database initialized");
 
-    let git_watcher = GitWatcherManager::new();
+    let git_watcher = Arc::new(GitWatcherManager::new());
 
     // Channel for streaming events (written to stdout)
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<OutgoingMessage>();
@@ -81,9 +85,18 @@ async fn main() {
             }
         };
 
-        let result = router::handle_request(req, &mut session_manager, event_tx.clone(), &database, &git_watcher).await;
-        if let Ok(json) = serde_json::to_string(&result) {
-            let _ = out_tx.send(json);
-        }
+        // Spawn each request concurrently instead of awaiting serially
+        let sm = Arc::clone(&session_manager);
+        let etx = event_tx.clone();
+        let db = Arc::clone(&database);
+        let gw = Arc::clone(&git_watcher);
+        let otx = out_tx.clone();
+
+        tokio::spawn(async move {
+            let result = router::handle_request(req, &sm, etx, &db, &gw).await;
+            if let Ok(json) = serde_json::to_string(&result) {
+                let _ = otx.send(json);
+            }
+        });
     }
 }
