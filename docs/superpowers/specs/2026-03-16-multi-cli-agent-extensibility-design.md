@@ -43,8 +43,10 @@ Current (unchanged):
 ```
 ai-backend/src/
   claude/
+    mod.rs             # NOT modified
     client.rs          # ClaudeProcess — NOT modified
     types.rs           # ClaudeJson — NOT modified
+    stream.rs          # Stream helpers — NOT modified
   normalizer/
     parser.rs          # process_claude_stream() — NOT modified
     blocks.rs          # block event helpers — NOT modified
@@ -130,21 +132,19 @@ Key difference: Codex uses **short-lived processes** per turn. SessionManager do
 
 ### 4.3 ActiveSession Extension
 
+The actual `ActiveSession` struct (in `session/manager.rs`) wraps session metadata inside an `info: Session` field, and uses `Arc<ClaudeProcess>` (no Mutex). The working directory lives on `SessionManager`, not on individual sessions. New fields are added alongside existing ones:
+
 ```rust
-// session/types.rs
-pub struct ActiveSession {
-    pub id: String,
-    pub model: String,
-    pub working_dir: String,
-    pub agent_type: AgentType,  // NEW
+// session/manager.rs
+pub(crate) struct ActiveSession {
+    info: Session,                                    // existing — wraps id, model, etc.
+    claude_process: Option<Arc<ClaudeProcess>>,        // existing — untouched
+    claude_session_id: Option<String>,                 // existing — untouched
 
-    // Claude-specific (existing, untouched)
-    pub claude_process: Option<Arc<Mutex<ClaudeProcess>>>,
-    pub claude_session_id: Option<String>,
-
-    // Codex-specific (new)
-    pub codex_process: Option<Arc<Mutex<CodexProcess>>>,
-    pub codex_thread_id: Option<String>,
+    // New fields for multi-agent support
+    agent_type: AgentType,
+    codex_process: Option<Arc<CodexProcess>>,           // transient — set during active turn only
+    codex_thread_id: Option<String>,
 }
 
 pub enum AgentType {
@@ -152,6 +152,8 @@ pub enum AgentType {
     Codex,
 }
 ```
+
+**Important:** `codex_process` is transient. Since Codex uses short-lived processes per turn, the normalizer's completion callback must clear `codex_process` to `None` after each turn's process exits. `interrupt()` must check that `codex_process.is_some()` before sending SIGINT to avoid hitting a stale PID.
 
 ---
 
@@ -173,11 +175,20 @@ pub enum AgentType {
 | `item.completed { type: "command_execution" }` | `block.stop { status: done/error }` | — |
 | `item.started { type: "file_change" }` | `block.start { type: "tool_call", tool: "Edit", agent: "codex" }` | tool_call |
 | `item.completed { type: "file_change" }` | `block.stop { status: "done" }` | — |
-| `item.started { type: "reasoning" }` | `block.start { type: "text", subtype: "thinking" }` | text (thinking) |
+| `item.started { type: "reasoning" }` | Silently dropped (same as Claude's thinking blocks) | — |
 | `item.started { type: "mcp_tool_call" }` | `block.start { type: "tool_call", tool: <mcp_name> }` | tool_call |
 | `turn.completed { usage }` | `message.complete { usage, agent: "codex" }` | — |
+| Codex process exits non-zero / stderr error | `message.error { error, agent: "codex" }` | — |
+| `item.completed { status: "failed" }` | `block.stop { status: "error", error }` | — |
 
-### 5.2 Protocol Extension
+### 5.2 Error Handling
+
+Codex errors map to the existing `message.error` event:
+- **Process exit non-zero:** Emit `message.error` with stderr content
+- **Item failure:** `item.completed` with failed status → `block.stop { status: "error" }`
+- **Unexpected termination:** Detect process exit during active turn → `message.error`
+
+### 5.3 Protocol Extension
 
 All block events gain an optional `agent` field:
 
@@ -196,7 +207,7 @@ All block events gain an optional `agent` field:
 - Claude normalizer is NOT modified — it simply doesn't emit the field
 - Frontend treats absent `agent` as `"claude"` (backward compatible)
 
-### 5.3 Unknown Event Handling
+### 5.4 Unknown Event Handling
 
 Any unrecognized Codex event type is logged at `warn` level and silently dropped. This prevents unknown future Codex events from breaking the pipeline.
 
@@ -220,7 +231,17 @@ interface Session {
 
   // New fields
   codexThreadId?: string;
-  agent?: 'claude' | 'codex';
+}
+```
+
+**Note on `agent` derivation:** The agent type is derived from the `model` field at point of use — no separate `agent` field on `Session`. Convention: `model.startsWith('claude')` → Claude, `model === 'codex'` → Codex. This covers both `"claude-code"` (from NewSessionModal) and `"claude-sonnet-4-20250514"` (from router defaults). A helper function `getAgentType(model: string): 'claude' | 'codex'` can be added to avoid repetition.
+
+```typescript
+// Helper (in types.ts or utils)
+function getAgentType(model: string): 'claude' | 'codex' {
+  if (model.startsWith('claude')) return 'claude';
+  if (model === 'codex') return 'codex';
+  return 'claude'; // fallback
 }
 
 interface DbSession {
@@ -230,14 +251,17 @@ interface DbSession {
 
   // New fields
   codex_thread_id: string | null;
-  agent: string | null;  // null treated as 'claude'
+  // No `agent` column — derived from `model` at query time
 }
 ```
 
 ### 6.2 Backend Service (`backend.ts`)
 
+The existing `createSession(model: string, claudeSessionId?: string)` changes to an opts-based signature. This is a **breaking change** to existing callers — all call sites in `SessionWindow.tsx` that currently pass `claudeSessionId` as a positional arg must wrap it in the opts object. This is the one place where the Claude code path sees a minor syntactic change (not behavioral).
+
 ```typescript
-// createSession signature change
+// Before: createSession(model, claudeSessionId?)
+// After:
 createSession(
   model: string,
   opts?: {
@@ -245,6 +269,17 @@ createSession(
     codexThreadId?: string;
   }
 ): Promise<string>
+```
+
+The `onSessionInit` callback type also extends:
+
+```typescript
+onSessionInit(callback: (data: {
+  session_id: string;
+  claude_session_id?: string;
+  codex_thread_id?: string;
+  agent?: 'claude' | 'codex';
+}) => void)
 ```
 
 ### 6.3 SessionWindow.tsx
@@ -293,14 +328,22 @@ backend.onSessionInit(({ session_id, claude_session_id, codex_thread_id, agent }
 
 ## 7. Database Schema
 
-Add two columns to the sessions table:
+Add one column to the sessions table via a new migration version (`migrate_v3` or next available version in `ai-backend/src/db/migrations.rs`):
 
 ```sql
 ALTER TABLE sessions ADD COLUMN codex_thread_id TEXT;
-ALTER TABLE sessions ADD COLUMN agent TEXT DEFAULT 'claude';
 ```
 
-Existing rows get `agent = 'claude'` by default. No data migration needed.
+No `agent` column needed — agent type is derived from the existing `model` column.
+
+**Rust-side changes required in `ai-backend/src/db/`:**
+- `types.rs`: Add `codex_thread_id: Option<String>` to `DbSession` struct
+- `sessions.rs`: Update all SQL queries that touch the sessions table:
+  - `create()` — add `codex_thread_id` to INSERT
+  - `get_by_id()` — add to SELECT column list
+  - `list_by_project()` — add to SELECT column list
+  - `update()` — add to UPDATE SET clause
+- `migrations.rs`: Add `migrate_v3()` (or next version) with the ALTER TABLE statement
 
 ---
 
@@ -322,10 +365,10 @@ When adding agent N+1 (e.g., Aider), follow this checklist:
 9. Add branch in SessionWindow session.init handler
 10. Add model option + icon in NewSessionModal
 
-### Refactoring Signal
+### Refactoring Signal — Hard Commitment
 Upgrade from match dispatch to `AgentDriver` trait + `AgentRegistry` when:
-- Agent count ≥ 4, OR
-- Match branches contain significant duplicated logic
+- Agent count ≥ 4 — this is a **hard trigger**, not a suggestion
+- OR match branches contain significant duplicated logic (>50% shared code)
 
 ---
 
