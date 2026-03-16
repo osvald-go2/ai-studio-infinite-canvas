@@ -153,12 +153,10 @@ pub async fn process_codex_stream(
     }
 
     // Clear the codex process reference so SessionManager knows it's gone.
-    // NOTE: The `codex_process` field on ActiveSession will be added in Task 6.
-    // For now we perform the lock + lookup so the plumbing is in place.
     {
         let mut sessions = sessions_arc.lock().unwrap();
-        if let Some(_active) = sessions.get_mut(session_id) {
-            // TODO(task-6): _active.codex_process = None;
+        if let Some(active) = sessions.get_mut(session_id) {
+            active.codex_process = None;
         }
     }
 }

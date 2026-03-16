@@ -9,7 +9,7 @@ use crate::git::{commands as git_cmd, worktree as git_wt};
 
 pub async fn handle_request(
     req: Request,
-    session_manager: &mut SessionManager,
+    session_manager: &SessionManager,
     event_tx: mpsc::UnboundedSender<OutgoingMessage>,
     database: &Database,
     git_watcher: &GitWatcherManager,
@@ -45,8 +45,11 @@ pub async fn handle_request(
             let claude_session_id = req.params.get("claude_session_id")
                 .and_then(|v| v.as_str())
                 .map(String::from);
+            let codex_thread_id = req.params.get("codex_thread_id")
+                .and_then(|v| v.as_str())
+                .map(String::from);
 
-            let session_id = session_manager.create(model, max_tokens, claude_session_id);
+            let session_id = session_manager.create(model, max_tokens, claude_session_id, codex_thread_id);
             Response::ok(req.id, json!({"session_id": session_id}))
         }
 
@@ -633,7 +636,7 @@ fn get_dir(req: &Request, session_manager: &SessionManager) -> String {
         .get("dir")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
-        .unwrap_or_else(|| session_manager.get_working_dir().to_string())
+        .unwrap_or_else(|| session_manager.get_working_dir())
 }
 
 /// Build a compact diff string for the commit-message prompt.

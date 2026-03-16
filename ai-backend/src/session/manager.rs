@@ -36,11 +36,13 @@ pub(crate) struct ActiveSession {
     info: Session,
     claude_process: Option<Arc<ClaudeProcess>>,
     claude_session_id: Option<String>,
+    pub(crate) codex_process: Option<Arc<crate::codex::client::CodexProcess>>,
+    pub(crate) codex_thread_id: Option<String>,
 }
 
 pub struct SessionManager {
     pub(crate) sessions: Arc<Mutex<HashMap<String, ActiveSession>>>,
-    working_dir: String,
+    working_dir: Mutex<String>,
 }
 
 impl SessionManager {
@@ -52,23 +54,24 @@ impl SessionManager {
 
         SessionManager {
             sessions: Arc::new(Mutex::new(HashMap::new())),
-            working_dir,
+            working_dir: Mutex::new(working_dir),
         }
     }
 
-    pub fn set_api_key(&mut self, _key: String) {
+    pub fn set_api_key(&self, _key: String) {
         // No-op: claude CLI handles its own authentication
     }
 
-    pub fn set_working_dir(&mut self, dir: String) {
-        self.working_dir = dir;
+    pub fn set_working_dir(&self, dir: String) {
+        *self.working_dir.lock().unwrap() = dir;
     }
 
     pub fn create(
-        &mut self,
+        &self,
         model: String,
         max_tokens: u32,
         claude_session_id: Option<String>,
+        codex_thread_id: Option<String>,
     ) -> String {
         let id = Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
@@ -85,6 +88,8 @@ impl SessionManager {
             info,
             claude_process: None,
             claude_session_id,
+            codex_process: None,
+            codex_thread_id,
         };
 
         self.sessions.lock().unwrap().insert(id.clone(), active);
@@ -92,74 +97,133 @@ impl SessionManager {
     }
 
     pub async fn send(
-        &mut self,
+        &self,
         session_id: &str,
         text: &str,
         event_tx: mpsc::UnboundedSender<OutgoingMessage>,
     ) -> Result<(), SessionError> {
-        // Check session exists
-        {
+        // Check session exists and determine model
+        let is_codex = {
             let sessions = self.sessions.lock().unwrap();
-            if !sessions.contains_key(session_id) {
-                return Err(SessionError::NotFound(session_id.to_string()));
-            }
-        }
-
-        // Get or spawn claude process for this session
-        let claude_process = {
-            let mut sessions = self.sessions.lock().unwrap();
-            let active = sessions.get_mut(session_id).unwrap();
-
-            if let Some(ref process) = active.claude_process {
-                process.clone()
-            } else {
-                // Spawn new claude CLI process, passing resume ID if available
-                let working_dir = self.working_dir.clone();
-                let resume_id = active.claude_session_id.as_deref();
-                let (process, msg_rx) = ClaudeProcess::spawn(&working_dir, resume_id)
-                    .map_err(|e| SessionError::SpawnFailed(e))?;
-
-                let process = Arc::new(process);
-                active.claude_process = Some(process.clone());
-
-                // Create shared slot for claude_session_id capture
-                let claude_sid_slot = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
-                let slot_clone = claude_sid_slot.clone();
-
-                // Spawn normalizer task to process claude output
-                let sid = session_id.to_string();
-                let tx = event_tx.clone();
-                tokio::spawn(async move {
-                    crate::normalizer::parser::process_claude_stream(&sid, msg_rx, tx, slot_clone).await;
-                });
-
-                // Spawn follow-up task to write claude_session_id back to ActiveSession
-                let sessions_arc = self.sessions_arc();
-                let sid_owned = session_id.to_string();
-                let slot = claude_sid_slot.clone();
-                tokio::spawn(async move {
-                    for _ in 0..50 {
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                        let val = slot.lock().unwrap().clone();
-                        if let Some(csid) = val {
-                            let mut sessions = sessions_arc.lock().unwrap();
-                            if let Some(active) = sessions.get_mut(&sid_owned) {
-                                active.claude_session_id = Some(csid);
-                            }
-                            break;
-                        }
-                    }
-                });
-
-                process
-            }
+            let active = sessions.get(session_id)
+                .ok_or_else(|| SessionError::NotFound(session_id.to_string()))?;
+            active.info.model == "codex"
         };
 
-        // Send user message to claude process
-        claude_process.send_message(text).await
-            .map_err(|e| SessionError::SpawnFailed(e))?;
+        if is_codex {
+            // ── Codex path ────────────────────────────────────────────
+            use crate::codex::client::CodexProcess;
 
-        Ok(())
+            let working_dir = self.working_dir.lock().unwrap().clone();
+            let resume_tid = {
+                let sessions = self.sessions.lock().unwrap();
+                let active = sessions.get(session_id).unwrap();
+                active.codex_thread_id.clone()
+            };
+
+            let (process, event_rx, stderr_rx) =
+                CodexProcess::spawn(&working_dir, text, resume_tid.as_deref())
+                    .map_err(|e| SessionError::SpawnFailed(e))?;
+
+            let process = Arc::new(process);
+
+            // Store the process in the active session
+            {
+                let mut sessions = self.sessions.lock().unwrap();
+                let active = sessions.get_mut(session_id).unwrap();
+                active.codex_process = Some(process.clone());
+            }
+
+            // Create shared slot for codex_thread_id capture
+            let codex_tid_slot = Arc::new(std::sync::Mutex::new(None::<String>));
+            let slot_clone = codex_tid_slot.clone();
+
+            // Spawn normalizer task to process codex output
+            let sid = session_id.to_string();
+            let tx = event_tx.clone();
+            let sessions_arc = self.sessions_arc();
+            tokio::spawn(async move {
+                crate::codex::normalizer::process_codex_stream(
+                    &sid, event_rx, stderr_rx, tx, slot_clone, sessions_arc,
+                ).await;
+            });
+
+            // Spawn follow-up task to poll slot and write codex_thread_id back to ActiveSession
+            let sessions_arc = self.sessions_arc();
+            let sid_owned = session_id.to_string();
+            let slot = codex_tid_slot.clone();
+            tokio::spawn(async move {
+                for _ in 0..50 {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    let val = slot.lock().unwrap().clone();
+                    if let Some(tid) = val {
+                        let mut sessions = sessions_arc.lock().unwrap();
+                        if let Some(active) = sessions.get_mut(&sid_owned) {
+                            active.codex_thread_id = Some(tid);
+                        }
+                        break;
+                    }
+                }
+            });
+
+            Ok(())
+        } else {
+            // ── Claude path (existing, untouched) ─────────────────────
+            let claude_process = {
+                let mut sessions = self.sessions.lock().unwrap();
+                let active = sessions.get_mut(session_id).unwrap();
+
+                if let Some(ref process) = active.claude_process {
+                    process.clone()
+                } else {
+                    // Spawn new claude CLI process, passing resume ID if available
+                    let working_dir = self.working_dir.lock().unwrap().clone();
+                    let resume_id = active.claude_session_id.as_deref();
+                    let (process, msg_rx) = ClaudeProcess::spawn(&working_dir, resume_id)
+                        .map_err(|e| SessionError::SpawnFailed(e))?;
+
+                    let process = Arc::new(process);
+                    active.claude_process = Some(process.clone());
+
+                    // Create shared slot for claude_session_id capture
+                    let claude_sid_slot = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+                    let slot_clone = claude_sid_slot.clone();
+
+                    // Spawn normalizer task to process claude output
+                    let sid = session_id.to_string();
+                    let tx = event_tx.clone();
+                    tokio::spawn(async move {
+                        crate::normalizer::parser::process_claude_stream(&sid, msg_rx, tx, slot_clone).await;
+                    });
+
+                    // Spawn follow-up task to write claude_session_id back to ActiveSession
+                    let sessions_arc = self.sessions_arc();
+                    let sid_owned = session_id.to_string();
+                    let slot = claude_sid_slot.clone();
+                    tokio::spawn(async move {
+                        for _ in 0..50 {
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                            let val = slot.lock().unwrap().clone();
+                            if let Some(csid) = val {
+                                let mut sessions = sessions_arc.lock().unwrap();
+                                if let Some(active) = sessions.get_mut(&sid_owned) {
+                                    active.claude_session_id = Some(csid);
+                                }
+                                break;
+                            }
+                        }
+                    });
+
+                    process
+                }
+            };
+
+            // Send user message to claude process
+            claude_process.send_message(text).await
+                .map_err(|e| SessionError::SpawnFailed(e))?;
+
+            Ok(())
+        }
     }
 
     pub fn list(&self) -> Vec<SessionSummary> {
@@ -175,14 +239,14 @@ impl SessionManager {
             .collect()
     }
 
-    pub fn kill(&mut self, session_id: &str) {
+    pub fn kill(&self, session_id: &str) {
         self.sessions.lock().unwrap().remove(session_id);
         // ClaudeProcess will be dropped, killing the child process
     }
 
     /// Create a temporary session with an "ephemeral-" prefixed ID.
     /// Ephemeral sessions are used for one-shot AI tasks (e.g. commit message generation).
-    pub fn create_ephemeral_session(&mut self, model: String, max_tokens: u32) -> String {
+    pub fn create_ephemeral_session(&self, model: String, max_tokens: u32) -> String {
         let id = format!("ephemeral-{}", uuid::Uuid::new_v4());
         let now = chrono::Utc::now().to_rfc3339();
 
@@ -198,6 +262,8 @@ impl SessionManager {
             info,
             claude_process: None,
             claude_session_id: None,
+            codex_process: None,
+            codex_thread_id: None,
         };
 
         self.sessions.lock().unwrap().insert(id.clone(), active);
@@ -208,15 +274,21 @@ impl SessionManager {
         let sessions = self.sessions.lock().unwrap();
         let active = sessions.get(session_id)
             .ok_or_else(|| SessionError::NotFound(session_id.to_string()))?;
-        if let Some(ref process) = active.claude_process {
-            process.interrupt()
-                .map_err(|e| SessionError::SpawnFailed(e))?;
+        if active.info.model == "codex" {
+            if let Some(ref process) = active.codex_process {
+                process.interrupt().map_err(|e| SessionError::SpawnFailed(e))?;
+            }
+        } else {
+            if let Some(ref process) = active.claude_process {
+                process.interrupt()
+                    .map_err(|e| SessionError::SpawnFailed(e))?;
+            }
         }
         Ok(())
     }
 
-    pub fn get_working_dir(&self) -> &str {
-        &self.working_dir
+    pub fn get_working_dir(&self) -> String {
+        self.working_dir.lock().unwrap().clone()
     }
 
     /// Return a clone of the sessions Arc so callers can schedule deferred cleanup.
