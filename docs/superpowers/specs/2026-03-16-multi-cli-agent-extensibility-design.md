@@ -70,7 +70,7 @@ ai-backend/src/
 The only change to `session/manager.rs` — a match branch in `send()`:
 
 ```rust
-match session.model.as_str() {
+match active_session.info.model.as_str() {
     m if m.starts_with("claude") => {
         // Existing ClaudeProcess logic, untouched
     }
@@ -80,6 +80,8 @@ match session.model.as_str() {
     _ => return Err("unsupported model")
 }
 ```
+
+No `AgentType` enum — the `info.model` string is the single source of truth for dispatch, avoiding redundancy.
 
 Similar match branches in `interrupt()` and `kill()` where agent-specific behavior differs.
 
@@ -141,15 +143,9 @@ pub(crate) struct ActiveSession {
     claude_process: Option<Arc<ClaudeProcess>>,        // existing — untouched
     claude_session_id: Option<String>,                 // existing — untouched
 
-    // New fields for multi-agent support
-    agent_type: AgentType,
+    // New fields for Codex support
     codex_process: Option<Arc<CodexProcess>>,           // transient — set during active turn only
     codex_thread_id: Option<String>,
-}
-
-pub enum AgentType {
-    Claude,
-    Codex,
 }
 ```
 
@@ -259,6 +255,8 @@ interface DbSession {
 
 The existing `createSession(model: string, claudeSessionId?: string)` changes to an opts-based signature. This is a **breaking change** to existing callers — all call sites in `SessionWindow.tsx` that currently pass `claudeSessionId` as a positional arg must wrap it in the opts object. This is the one place where the Claude code path sees a minor syntactic change (not behavioral).
 
+**Note on `max_tokens`:** The Rust-side `SessionManager::create()` accepts `max_tokens` as a parameter (defaulted to 4096 by the router). This parameter is agent-agnostic and remains unchanged — it is not part of the opts object and continues to be handled at the router level.
+
 ```typescript
 // Before: createSession(model, claudeSessionId?)
 // After:
@@ -303,7 +301,7 @@ backend.onSessionInit(({ session_id, claude_session_id, codex_thread_id, agent }
   if (session_id !== backendSessionId) return;
 
   if (agent === 'codex') {
-    onUpdate({ ...session, codexThreadId: codex_thread_id, agent: 'codex' });
+    onUpdate({ ...session, codexThreadId: codex_thread_id });
   } else {
     onUpdate({ ...session, claudeSessionId: claude_session_id });
   }
@@ -328,7 +326,7 @@ backend.onSessionInit(({ session_id, claude_session_id, codex_thread_id, agent }
 
 ## 7. Database Schema
 
-Add one column to the sessions table via a new migration version (`migrate_v3` or next available version in `ai-backend/src/db/migrations.rs`):
+Add one column to the sessions table via `migrate_v3` in `ai-backend/src/db/migrations.rs` (current version is v2):
 
 ```sql
 ALTER TABLE sessions ADD COLUMN codex_thread_id TEXT;
@@ -353,10 +351,9 @@ When adding agent N+1 (e.g., Aider), follow this checklist:
 
 ### Backend (Rust)
 1. Create `ai-backend/src/<agent>/` with `client.rs`, `types.rs`, `normalizer.rs`
-2. Add match branch in `session/manager.rs` send/interrupt/kill
-3. Add `<Agent>` variant to `AgentType` enum
-4. Add optional `<agent>_session_id` to `ActiveSession`
-5. Add `<agent>_session_id` column to sessions table
+2. Add match branch in `session/manager.rs` send/interrupt/kill (dispatch on `info.model`)
+3. Add optional `<agent>_process` and `<agent>_session_id` to `ActiveSession`
+4. Add `<agent>_session_id` column to sessions table via new migration
 
 ### Frontend (TypeScript)
 6. Add `<agent>SessionId?` and agent union value to `Session` type
