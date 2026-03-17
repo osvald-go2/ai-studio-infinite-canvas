@@ -42,7 +42,12 @@ export default defineConfig(({ mode }) => {
       },
       resolve: {
         alias: {
-          '@': path.resolve(__dirname, '.'),
+          '@': path.resolve(__dirname, 'src'),
+        },
+      },
+      server: {
+        watch: {
+          ignored: ['**/.ai-studio/**', '**/.worktrees/**', '**/worktrees/**', '**/.superpowers/**'],
         },
       },
     },

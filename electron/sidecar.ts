@@ -90,7 +90,7 @@ export class SidecarManager extends EventEmitter {
     }
   }
 
-  async invoke(method: string, params: any = {}): Promise<any> {
+  async invoke(method: string, params: any = {}, timeoutMs = 15000): Promise<any> {
     if (!this.process || !this.process.stdin) {
       throw new Error('sidecar not running');
     }
@@ -99,7 +99,15 @@ export class SidecarManager extends EventEmitter {
     const request = JSON.stringify({ id, method, params });
 
     return new Promise((resolve, reject) => {
-      this.pendingRequests.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.pendingRequests.delete(id);
+        reject(new Error(`sidecar invoke '${method}' timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      this.pendingRequests.set(id, {
+        resolve: (result: any) => { clearTimeout(timer); resolve(result); },
+        reject: (error: any) => { clearTimeout(timer); reject(error); },
+      });
       this.process!.stdin!.write(request + '\n');
     });
   }

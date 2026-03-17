@@ -31,6 +31,9 @@ pub async fn process_codex_stream(
 ) {
     let mut block_index: usize = 0;
     let mut turn_completed = false;
+    // Track items that received an ItemStarted event, keyed by item id.
+    // Codex often skips ItemStarted and only sends ItemCompleted.
+    let mut started_items: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     while let Some(event) = event_rx.recv().await {
         match event {
@@ -57,6 +60,9 @@ pub async fn process_codex_stream(
             // ── item.started ───────────────────────────────────────────
             CodexEvent::ItemStarted { item } => {
                 if let Some(block) = item_started_block(&item) {
+                    if let Some(id) = &item.id {
+                        started_items.insert(id.clone());
+                    }
                     let _ = event_tx.send(Event::new(
                         "block.start",
                         json!({
@@ -73,6 +79,32 @@ pub async fn process_codex_stream(
 
             // ── item.completed ─────────────────────────────────────────
             CodexEvent::ItemCompleted { item } => {
+                let item_type = item.item_type.as_deref().unwrap_or("");
+                if item_type == "reasoning" {
+                    continue; // dropped
+                }
+
+                // Codex often skips item.started and only sends item.completed.
+                // If we never saw an ItemStarted for this item, synthesise block.start.
+                let already_started = item.id.as_ref()
+                    .map(|id| started_items.contains(id))
+                    .unwrap_or(false);
+
+                if !already_started {
+                    if let Some(block) = item_started_block(&item) {
+                        let _ = event_tx.send(Event::new(
+                            "block.start",
+                            json!({
+                                "session_id": session_id,
+                                "block_index": block_index,
+                                "block": block,
+                                "agent": "codex",
+                            }),
+                        ));
+                        block_index += 1;
+                    }
+                }
+
                 let (delta_content, status) = item_completed_content(&item);
 
                 // Emit block.delta with the final content / output
@@ -317,10 +349,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_agent_message_produces_text_block() {
+        // Test with ItemStarted + ItemCompleted (same id → no duplicate block.start)
         let events = vec![
             CodexEvent::ItemStarted {
                 item: CodexItem {
-                    id: None,
+                    id: Some("item_0".into()),
                     item_type: Some("agent_message".into()),
                     status: None,
                     text: Some("Hello!".into()),
@@ -333,7 +366,7 @@ mod tests {
             },
             CodexEvent::ItemCompleted {
                 item: CodexItem {
-                    id: None,
+                    id: Some("item_0".into()),
                     item_type: Some("agent_message".into()),
                     status: None,
                     text: Some("Hello!".into()),
@@ -358,6 +391,46 @@ mod tests {
         assert_eq!(delta["data"]["delta"]["content"], "Hello!");
 
         let stop = event_json(&out[2]);
+        assert_eq!(stop["event"], "block.stop");
+        assert_eq!(stop["data"]["status"], "done");
+    }
+
+    #[tokio::test]
+    async fn test_item_completed_without_started_synthesizes_block() {
+        // Real Codex behavior: only item.completed, no item.started
+        let events = vec![
+            CodexEvent::ThreadStarted { thread_id: Some("tid".into()) },
+            CodexEvent::TurnStarted {},
+            CodexEvent::ItemCompleted {
+                item: CodexItem {
+                    id: Some("item_0".into()),
+                    item_type: Some("agent_message".into()),
+                    status: None,
+                    text: Some("Hi!".into()),
+                    command: None,
+                    output: None,
+                    exit_code: None,
+                    filename: None,
+                    content: None,
+                },
+            },
+            CodexEvent::TurnCompleted { usage: None },
+        ];
+        let out = run_normalizer(events).await;
+
+        // session.init, block.start (synthesized), block.delta, block.stop, message.complete
+        let init = event_json(&out[0]);
+        assert_eq!(init["event"], "session.init");
+
+        let start = event_json(&out[1]);
+        assert_eq!(start["event"], "block.start");
+        assert_eq!(start["data"]["block"]["type"], "text");
+
+        let delta = event_json(&out[2]);
+        assert_eq!(delta["event"], "block.delta");
+        assert_eq!(delta["data"]["delta"]["content"], "Hi!");
+
+        let stop = event_json(&out[3]);
         assert_eq!(stop["event"], "block.stop");
         assert_eq!(stop["data"]["status"], "done");
     }

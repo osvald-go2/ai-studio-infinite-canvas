@@ -14,6 +14,7 @@ export function CanvasView({
   onCanvasResize,
   onToggleGitPanel,
   onCopySession,
+  onActiveSessionChange,
 }: {
   sessions: Session[],
   setSessions: any,
@@ -24,6 +25,7 @@ export function CanvasView({
   onCanvasResize?: (width: number) => void,
   onToggleGitPanel?: () => void,
   onCopySession?: (title: string) => void,
+  onActiveSessionChange?: (id: string | null) => void,
 }) {
   const setTransform = onTransformChange;
   const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
@@ -39,6 +41,11 @@ export function CanvasView({
   const [isArranging, setIsArranging] = useState(false);
   const arrangingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+
+  // Notify parent of active session changes
+  useEffect(() => {
+    onActiveSessionChange?.(selectedSessionIds[selectedSessionIds.length - 1] ?? null);
+  }, [selectedSessionIds]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -269,7 +276,7 @@ export function CanvasView({
         x: START_X + minCol * (SESSION_WIDTH + SESSION_GAP),
         y: columnHeights[minCol],
       };
-      columnHeights[minCol] += (session.height ?? SESSION_DEFAULT_HEIGHT) + SESSION_GAP;
+      columnHeights[minCol] += SESSION_DEFAULT_HEIGHT + SESSION_GAP;
     }
 
     if (arrangingTimeoutRef.current) {
@@ -278,7 +285,9 @@ export function CanvasView({
 
     setIsArranging(true);
     setSessions((prev: Session[]) =>
-      prev.map(s => updates[s.id] ? { ...s, position: updates[s.id] } : s)
+      prev.map(s => updates[s.id]
+        ? { ...s, position: updates[s.id], height: SESSION_DEFAULT_HEIGHT, prevHeight: undefined }
+        : s)
     );
     setTransform(prev => ({ ...prev, x: 0, y: 0 }));
 

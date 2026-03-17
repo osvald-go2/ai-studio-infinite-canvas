@@ -74,6 +74,7 @@ interface GitActions {
   refreshBranches: () => Promise<void>;
   refreshLog: () => Promise<void>;
   refreshInfo: () => Promise<void>;
+  refreshFileTree: () => Promise<void>;
   getDiff: (file: string) => Promise<DiffOutput>;
   getFileContent: (filePath: string, gitRef?: string) => Promise<string>;
   generateCommitMsg: () => Promise<string>;
@@ -95,10 +96,11 @@ const defaultInfo: GitInfo = {
 
 interface GitProviderProps {
   projectDir: string | null;
+  overrideDir?: string | null;
   children: React.ReactNode;
 }
 
-export function GitProvider({ projectDir, children }: GitProviderProps) {
+export function GitProvider({ projectDir, overrideDir, children }: GitProviderProps) {
   const [state, setState] = useState<GitState>({
     isRepo: false,
     info: defaultInfo,
@@ -110,43 +112,54 @@ export function GitProvider({ projectDir, children }: GitProviderProps) {
     loading: true,
   });
 
-  const dirRef = useRef(projectDir);
-  dirRef.current = projectDir;
+  const effectiveDir = overrideDir || projectDir;
+  const dirRef = useRef(effectiveDir);
+  dirRef.current = effectiveDir;
 
-  const dir = projectDir ?? '';
+  const dir = effectiveDir ?? '';
 
   const refreshInfo = useCallback(async () => {
     if (!dir || !isElectron()) return;
-    const info = await gitService.info(dir);
-    setState(prev => ({ ...prev, info }));
+    try {
+      const info = await gitService.info(dir);
+      setState(prev => ({ ...prev, info }));
+    } catch { /* empty repo or unavailable */ }
   }, [dir]);
 
   const refreshChanges = useCallback(async () => {
     if (!dir || !isElectron()) return;
-    const [changes, filePaths] = await Promise.all([
-      gitService.changes(dir),
-      gitService.fileTree(dir).catch(() => [] as string[]),
-    ]);
+    const changes = await gitService.changes(dir);
     setState(prev => ({
       ...prev,
       changes,
-      fileTree: buildFileTree(filePaths),
     }));
   }, [dir]);
 
   const refreshBranches = useCallback(async () => {
     if (!dir || !isElectron()) return;
-    const [branches, worktrees] = await Promise.all([
-      gitService.branches(dir),
-      gitService.worktrees(dir),
-    ]);
-    setState(prev => ({ ...prev, branches, worktrees }));
+    try {
+      const [branches, worktrees] = await Promise.all([
+        gitService.branches(dir),
+        gitService.worktrees(dir),
+      ]);
+      setState(prev => ({ ...prev, branches, worktrees }));
+    } catch { /* unavailable */ }
   }, [dir]);
 
   const refreshLog = useCallback(async () => {
     if (!dir || !isElectron()) return;
-    const log = await gitService.log(dir, 50);
-    setState(prev => ({ ...prev, log }));
+    try {
+      const log = await gitService.log(dir, 50);
+      setState(prev => ({ ...prev, log }));
+    } catch { /* empty repo or unavailable */ }
+  }, [dir]);
+
+  const refreshFileTree = useCallback(async () => {
+    if (!dir || !isElectron()) return;
+    try {
+      const filePaths = await gitService.fileTree(dir);
+      setState(prev => ({ ...prev, fileTree: buildFileTree(filePaths) }));
+    } catch { /* unavailable */ }
   }, [dir]);
 
   const refresh = useCallback(async () => {
@@ -159,13 +172,12 @@ export function GitProvider({ projectDir, children }: GitProviderProps) {
         setState(prev => ({ ...prev, isRepo: false, loading: false }));
         return;
       }
-      const [info, changes, branches, worktrees, log, filePaths] = await Promise.all([
-        gitService.info(dir),
-        gitService.changes(dir),
-        gitService.branches(dir),
-        gitService.worktrees(dir),
-        gitService.log(dir, 50),
-        gitService.fileTree(dir).catch(() => [] as string[]),
+      const [info, changes, branches, worktrees, log] = await Promise.all([
+        gitService.info(dir).catch(() => defaultInfo),
+        gitService.changes(dir).catch(() => [] as FileChange[]),
+        gitService.branches(dir).catch(() => [] as BranchInfo[]),
+        gitService.worktrees(dir).catch(() => [] as WorktreeInfo[]),
+        gitService.log(dir, 50).catch(() => [] as CommitInfo[]),
       ]);
       setState({
         isRepo: true,
@@ -174,7 +186,7 @@ export function GitProvider({ projectDir, children }: GitProviderProps) {
         branches,
         worktrees,
         log,
-        fileTree: buildFileTree(filePaths),
+        fileTree: [],
         loading: false,
       });
     } catch {
@@ -274,25 +286,27 @@ export function GitProvider({ projectDir, children }: GitProviderProps) {
     await refresh();
   }, [dir, refresh]);
 
+  const mainDir = projectDir ?? '';
+
   const createWorktree = useCallback(async (branch: string, base: string) => {
-    if (!dir || !isElectron()) return '';
-    const path = await gitService.createWorktree(dir, branch, base);
+    if (!mainDir || !isElectron()) return '';
+    const path = await gitService.createWorktree(mainDir, branch, base);
     await refreshBranches();
     return path;
-  }, [dir, refreshBranches]);
+  }, [mainDir, refreshBranches]);
 
   const mergeWorktree = useCallback(async (wtPath: string, target?: string) => {
-    if (!dir || !isElectron()) return '';
-    const msg = await gitService.mergeWorktree(dir, wtPath, target);
+    if (!mainDir || !isElectron()) return '';
+    const msg = await gitService.mergeWorktree(mainDir, wtPath, target);
     await refresh();
     return msg;
-  }, [dir, refresh]);
+  }, [mainDir, refresh]);
 
   const removeWorktree = useCallback(async (wtPath: string, branch: string) => {
-    if (!dir || !isElectron()) return;
-    await gitService.removeWorktree(dir, wtPath, branch);
+    if (!mainDir || !isElectron()) return;
+    await gitService.removeWorktree(mainDir, wtPath, branch);
     await refreshBranches();
-  }, [dir, refreshBranches]);
+  }, [mainDir, refreshBranches]);
 
   const getDiff = useCallback(async (file: string): Promise<DiffOutput> => {
     if (!dir) return { file_path: file, hunks: [] };
@@ -329,6 +343,7 @@ export function GitProvider({ projectDir, children }: GitProviderProps) {
     refreshBranches,
     refreshLog,
     refreshInfo,
+    refreshFileTree,
     getDiff,
     getFileContent,
     generateCommitMsg,

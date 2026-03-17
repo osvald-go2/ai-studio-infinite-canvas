@@ -23,14 +23,22 @@ function isElectron(): boolean {
 
 export async function scanSkills(model: string, projectDir?: string | null): Promise<SkillInfo[]> {
   const platform = MODEL_TO_PLATFORM[model];
+  console.log(`[skillScanner] model=${model}, platform=${platform}, projectDir=${projectDir}, isElectron=${isElectron()}`);
   if (!platform) return [];
 
   if (isElectron() && projectDir) {
     try {
-      return await window.aiBackend.scanSkills(platform, projectDir);
+      const scanned = await window.aiBackend.scanSkills(platform, projectDir);
+      console.log(`[skillScanner] IPC returned ${scanned.length} skills`, scanned);
+
+      // Merge with system-level skills — real scanned skills take priority
+      const seen = new Set(scanned.map((s: SkillInfo) => s.name));
+      const merged = [...scanned, ...MOCK_SKILLS.filter(s => !seen.has(s.name))];
+      console.log(`[skillScanner] merged total: ${merged.length} skills`);
+      return merged;
     } catch (e) {
-      console.warn('[skillScanner] scan failed:', e);
-      return [];
+      console.warn('[skillScanner] scan failed, falling back to mock:', e);
+      return MOCK_SKILLS;
     }
   }
 

@@ -36,6 +36,28 @@ fn parse_numstat(text: &str) -> (u32, u32) {
     (additions, deletions)
 }
 
+/// Parse batch numstat output into a file → (additions, deletions) map.
+fn parse_batch_numstat(output: &std::process::Output) -> HashMap<String, (u32, u32)> {
+    let mut map = HashMap::new();
+    if !output.status.success() {
+        return map;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = line.splitn(3, '\t').collect();
+        if parts.len() >= 3 {
+            let additions = parts[0].parse::<u32>().unwrap_or(0);
+            let deletions = parts[1].parse::<u32>().unwrap_or(0);
+            map.insert(parts[2].to_string(), (additions, deletions));
+        }
+    }
+    map
+}
+
 fn parse_diff_output(text: &str) -> Vec<DiffHunk> {
     let mut hunks: Vec<DiffHunk> = Vec::new();
     let mut old_line: u32 = 0;
@@ -143,9 +165,11 @@ pub fn init(dir: &str) -> Result<(), String> {
 
 /// Branch, last commit, and upstream ahead/behind counts.
 pub fn git_info(dir: &str) -> Result<GitInfo, String> {
-    let branch = run_git(dir, &["rev-parse", "--abbrev-ref", "HEAD"])?
-        .trim()
-        .to_string();
+    let branch = run_git_unchecked(dir, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| "main".to_string());
 
     let log_line = run_git(dir, &["log", "-1", "--format=%h %s"])
         .unwrap_or_default();
@@ -180,6 +204,14 @@ pub fn git_info(dir: &str) -> Result<GitInfo, String> {
 /// All changed files with their add/del line counts.
 pub fn git_changes(dir: &str) -> Result<Vec<FileChange>, String> {
     let stdout = run_git(dir, &["status", "--porcelain", "-u"])?;
+
+    // Batch: get all unstaged and staged numstats in 2 subprocess calls
+    let unstaged_out = run_git_unchecked(dir, &["diff", "--numstat"])?;
+    let unstaged_map = parse_batch_numstat(&unstaged_out);
+
+    let cached_out = run_git_unchecked(dir, &["diff", "--cached", "--numstat"])?;
+    let cached_map = parse_batch_numstat(&cached_out);
+
     let mut changes: Vec<FileChange> = Vec::new();
 
     for line in stdout.lines() {
@@ -203,26 +235,12 @@ pub fn git_changes(dir: &str) -> Result<Vec<FileChange>, String> {
         }
         .to_string();
 
-        // unstaged numstat
-        let diff_out = run_git_unchecked(dir, &["diff", "--numstat", "--", &file_path]);
-        let (mut additions, mut deletions) = match diff_out {
-            Ok(o) if o.status.success() => {
-                let text = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                if text.is_empty() {
-                    // try cached
-                    let cached = run_git_unchecked(dir, &["diff", "--cached", "--numstat", "--", &file_path]);
-                    match cached {
-                        Ok(o2) if o2.status.success() => {
-                            parse_numstat(String::from_utf8_lossy(&o2.stdout).trim())
-                        }
-                        _ => (0, 0),
-                    }
-                } else {
-                    parse_numstat(&text)
-                }
-            }
-            _ => (0, 0),
-        };
+        // Look up from batch numstat maps instead of per-file subprocesses
+        let (mut additions, mut deletions) = unstaged_map
+            .get(&file_path)
+            .copied()
+            .or_else(|| cached_map.get(&file_path).copied())
+            .unwrap_or((0, 0));
 
         // untracked: count file lines as additions
         if status == "?" && additions == 0 && deletions == 0 {
@@ -391,6 +409,12 @@ pub fn branches(dir: &str) -> Result<Vec<BranchInfo>, String> {
 
 /// List all tracked files in the repository
 pub fn file_tree(dir: &str) -> Result<Vec<String>, String> {
+    let has_commits = run_git_unchecked(dir, &["rev-parse", "--verify", "HEAD"])
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !has_commits {
+        return Ok(Vec::new());
+    }
     let output = run_git(dir, &["ls-tree", "-r", "--name-only", "HEAD"])?;
     Ok(output.lines().map(|l| l.to_string()).collect())
 }
@@ -401,14 +425,28 @@ pub fn file_content(dir: &str, path: &str, git_ref: Option<&str>) -> Result<Stri
         Some(r) => run_git(dir, &["show", &format!("{}:{}", r, path)]),
         None => {
             let full_path = std::path::Path::new(dir).join(path);
-            std::fs::read_to_string(&full_path)
-                .map_err(|e| format!("Failed to read {}: {}", path, e))
+            match std::fs::read_to_string(&full_path) {
+                Ok(content) => Ok(content),
+                Err(_) => {
+                    // Fallback: try reading from HEAD in git
+                    run_git(dir, &["show", &format!("HEAD:{}", path)])
+                        .map_err(|_| format!("Failed to read {}: file not found in working tree or git", path))
+                }
+            }
         }
     }
 }
 
 /// Last `count` commits with file lists and branch labels.
 pub fn log(dir: &str, count: u32) -> Result<Vec<CommitInfo>, String> {
+    // Empty repo: no commits yet
+    let has_commits = run_git_unchecked(dir, &["rev-parse", "--verify", "HEAD"])
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !has_commits {
+        return Ok(Vec::new());
+    }
+
     // Build hash → branch name map
     let branch_stdout = run_git_unchecked(dir, &["branch", "-a", "--format=%(objectname:short) %(refname:short)"])?;
     let mut branch_map: HashMap<String, Vec<String>> = HashMap::new();

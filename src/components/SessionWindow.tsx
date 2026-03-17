@@ -305,15 +305,18 @@ export function SessionWindow({
 
         if (isElectron()) {
           if (!backendSessionIdRef.current) {
+            console.log('[session] creating backend session, model:', session.model);
             const sid = await backend.createSession(session.model,
               sessionRef.current.model === 'codex'
                 ? { codexThreadId: sessionRef.current.codexThreadId }
                 : { claudeSessionId: sessionRef.current.claudeSessionId }
             );
+            console.log('[session] backend session created:', sid);
             backendSessionIdRef.current = sid;
             setBackendSessionId(sid);
           }
           try {
+            console.log('[session] sending message to', backendSessionIdRef.current, 'model:', session.model);
             await backend.sendMessage(backendSessionIdRef.current, initialText);
           } catch (e) {
             setIsStreaming(false);

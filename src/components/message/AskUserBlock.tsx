@@ -84,7 +84,7 @@ function QuestionPanel({
   );
 }
 
-export function AskUserBlock({ questions, submitted }: AskUserData) {
+export function AskUserBlock({ questions, submitted, onSubmit }: AskUserData & { onSubmit?: (text: string) => void }) {
   const [currentTab, setCurrentTab] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
@@ -105,6 +105,12 @@ export function AskUserBlock({ questions, submitted }: AskUserData) {
 
   const handleSubmitAll = () => {
     setIsSubmitted(true);
+    if (onSubmit) {
+      const text = questions.map((q, i) =>
+        `${i + 1}. ${q.question}\n   → ${answers[q.id] || '—'}`
+      ).join('\n');
+      onSubmit(text);
+    }
   };
 
   // Submitted state: flat list of Q&A

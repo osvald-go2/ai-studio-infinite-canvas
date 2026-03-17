@@ -1,7 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ChevronRight, ChevronDown, File, Folder, FolderOpen } from 'lucide-react';
 import { useGit } from '../../contexts/GitProvider';
+import { highlight } from '../../utils/syntaxHighlight';
 import type { TreeNode } from '../../types/git';
+
+function extToLanguage(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  const map: Record<string, string> = {
+    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+    rs: 'rust', go: 'go', py: 'python', rb: 'ruby',
+    css: 'css', html: 'html', json: 'json',
+    md: 'plaintext', txt: 'plaintext', toml: 'toml', yaml: 'yaml', yml: 'yaml',
+    sh: 'bash', zsh: 'bash', bash: 'bash',
+  };
+  return map[ext] ?? 'text';
+}
 
 function FileIcon({ name }: { name: string }) {
   const ext = name.split('.').pop()?.toLowerCase();
@@ -75,10 +88,16 @@ function TreeNodeItem({
 }
 
 export function FilesTab() {
-  const { fileTree, changes, getFileContent } = useGit();
+  const { fileTree, changes, getFileContent, refreshFileTree } = useGit();
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string>('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (fileTree.length === 0) {
+      refreshFileTree();
+    }
+  }, []);
 
   const changedPaths = new Map(changes.map(c => [c.path, c.status]));
 
@@ -109,11 +128,24 @@ export function FilesTab() {
         <div className="flex-1 overflow-auto p-3">
           {loading ? (
             <div className="text-white/30 text-xs">Loading...</div>
-          ) : (
-            <pre className="text-white/70 text-xs font-mono whitespace-pre-wrap break-all">
-              {fileContent}
-            </pre>
-          )}
+          ) : (() => {
+            const lines = fileContent.split('\n');
+            const lang = extToLanguage(selectedFile);
+            return (
+              <div className="flex text-xs font-mono leading-5">
+                <div className="text-white/20 text-right select-none pr-3 shrink-0" style={{ minWidth: `${String(lines.length).length + 1}ch` }}>
+                  {lines.map((_, i) => (
+                    <div key={i}>{i + 1}</div>
+                  ))}
+                </div>
+                <pre className="flex-1 overflow-x-auto text-white/70 whitespace-pre-wrap break-all">
+                  {lines.map((line, i) => (
+                    <div key={i} dangerouslySetInnerHTML={{ __html: highlight(line, lang) || '\n' }} />
+                  ))}
+                </pre>
+              </div>
+            );
+          })()}
         </div>
       </div>
     );

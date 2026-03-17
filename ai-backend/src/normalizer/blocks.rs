@@ -82,6 +82,8 @@ pub enum SkillStatus {
     Invoking,
     #[serde(rename = "done")]
     Done,
+    #[serde(rename = "error")]
+    Error,
 }
 
 #[derive(Debug, Clone, Serialize)]

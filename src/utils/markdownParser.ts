@@ -1,4 +1,7 @@
 /**
+ * @deprecated Use react-markdown + remark-gfm in TextBlock.tsx instead.
+ * This custom parser is kept temporarily for reference but is no longer used.
+ *
  * Lightweight markdown parser for streaming-compatible message rendering.
  * Returns an array of parsed segments that React components can render.
  */

@@ -11,7 +11,8 @@ pub struct CodexProcess {
 }
 
 impl CodexProcess {
-    /// Spawn `codex exec --json "prompt"` or `codex exec resume --session <id> --json "prompt"`
+    /// Spawn `codex exec --json --full-auto "prompt"`
+    /// or    `codex exec resume <SESSION_ID> "prompt" --json --full-auto`
     pub fn spawn(
         working_dir: &str,
         prompt: &str,
@@ -21,8 +22,10 @@ impl CodexProcess {
         let mut cmd = Command::new("codex");
 
         if let Some(thread_id) = resume_thread_id {
-            cmd.args(["exec", "resume", "--session", thread_id, "--json", prompt]);
+            // codex exec resume <SESSION_ID> <PROMPT> --json --full-auto
+            cmd.args(["exec", "resume", thread_id, prompt, "--json", "--full-auto"]);
         } else {
+            // codex exec --json --full-auto <PROMPT>
             cmd.args(["exec", "--json", "--full-auto", prompt]);
         }
 

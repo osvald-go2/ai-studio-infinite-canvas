@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, nativeImage } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { execSync } from 'child_process';
 import Store from 'electron-store';
 import * as pty from 'node-pty';
 import { SidecarManager } from './sidecar';
@@ -57,6 +58,21 @@ function createWindow(): void {
   });
 }
 
+function getShellPath(): string {
+  try {
+    const shell = process.env.SHELL || '/bin/zsh';
+    return execSync(`${shell} -ilc 'echo $PATH'`, { encoding: 'utf-8', timeout: 5000 }).trim();
+  } catch {
+    return process.env.PATH || '';
+  }
+}
+
+// On macOS, GUI apps launched from Finder have a minimal PATH.
+// Fix it once at startup by sourcing the user's login shell.
+if (process.platform === 'darwin' && app.isPackaged) {
+  process.env.PATH = getShellPath();
+}
+
 function getSidecarEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   const storedKey = store.get('anthropicApiKey');
@@ -92,6 +108,16 @@ function startSidecar(): void {
   });
 }
 
+const SLOW_METHOD_TIMEOUTS: Record<string, number> = {
+  'git.changes': 60000,
+  'git.file_tree': 60000,
+  'git.log': 30000,
+  'git.diff': 30000,
+  'git.commit': 30000,
+  'git.generate_commit_msg': 120000,
+  'session.send': 120000,
+};
+
 ipcMain.handle('sidecar:invoke', async (_, method: string, params: any) => {
   if (!sidecar || !sidecar.isRunning()) {
     throw new Error('sidecar not running');
@@ -101,7 +127,13 @@ ipcMain.handle('sidecar:invoke', async (_, method: string, params: any) => {
     store.set('anthropicApiKey', params.api_key);
   }
 
-  return sidecar.invoke(method, params);
+  const timeout = SLOW_METHOD_TIMEOUTS[method] ?? 15000;
+  try {
+    return await sidecar.invoke(method, params, timeout);
+  } catch (err: any) {
+    const message = typeof err === 'string' ? err : (err?.message || JSON.stringify(err));
+    throw new Error(message);
+  }
 });
 
 ipcMain.handle('window:toggleMaximize', () => {
@@ -149,6 +181,7 @@ ipcMain.handle('config:getLastProjectDir', () => {
 });
 
 ipcMain.handle('scan-skills', async (_, platform: string, projectDir: string) => {
+  console.log(`[scan-skills] handler called: platform=${platform}, projectDir=${projectDir}`);
   const results: Array<{ name: string; description: string; filePath: string; source: 'project' | 'user'; pluginName?: string }> = [];
 
   const walkDir = async (dir: string, source: 'project' | 'user', pluginName?: string) => {
@@ -180,15 +213,20 @@ ipcMain.handle('scan-skills', async (_, platform: string, projectDir: string) =>
   const userSkillsDir = path.join(os.homedir(), `.${platform}`, 'skills');
 
   await walkDir(projectSkillsDir, 'project');
+  console.log(`[scan-skills] after project skills: ${results.length} results`);
   await walkDir(userSkillsDir, 'user');
+  console.log(`[scan-skills] after user skills: ${results.length} results`);
 
   // Scan plugin skills (Claude only)
   if (platform === 'claude') {
     const pluginEntries = await getPluginSkillEntries(projectDir);
+    console.log(`[scan-skills] plugin entries: ${pluginEntries.length}`, pluginEntries.map(e => e.pluginName));
     for (const entry of pluginEntries) {
       await walkDir(entry.skillsDir, entry.source, entry.pluginName);
     }
   }
+
+  console.log(`[scan-skills] total results: ${results.length}`);
 
   const seen = new Set<string>();
   return results.filter(s => {
@@ -305,7 +343,7 @@ ipcMain.handle('pty:spawn', (_, cwd: string) => {
   // Ensure cwd exists, fall back to home dir
   const safeCwd = (cwd && fs.existsSync(cwd)) ? cwd : os.homedir();
 
-  const p = pty.spawn(shell, [], { name: 'xterm-256color', cols: 80, rows: 24, cwd: safeCwd });
+  const p = pty.spawn(shell, ['-l'], { name: 'xterm-256color', cols: 80, rows: 24, cwd: safeCwd });
   ptyProcesses.set(id, p);
   p.onData(data => mainWindow?.webContents.send('pty:data', { id, data }));
   p.onExit(({ exitCode }) => {
@@ -342,9 +380,29 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('window-all-closed', () => {
+let isQuitting = false;
+
+app.on('before-quit', async (event) => {
+  if (isQuitting) return;
+  event.preventDefault();
+  isQuitting = true;
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      mainWindow.webContents.send('app:before-quit');
+      await Promise.race([
+        new Promise<void>(resolve => ipcMain.once('app:flush-complete', () => resolve())),
+        new Promise<void>(resolve => setTimeout(resolve, 3000)),
+      ]);
+    } catch { /* proceed to quit */ }
+  }
+
   ptyProcesses.forEach(p => p.kill());
   ptyProcesses.clear();
   sidecar?.kill();
+  app.quit();
+});
+
+app.on('window-all-closed', () => {
   app.quit();
 });

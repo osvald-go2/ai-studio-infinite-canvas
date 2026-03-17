@@ -9,15 +9,26 @@ export function TabView({
   setSessions,
   focusedSessionId,
   projectDir,
+  onToggleGitPanel,
+  onCopySession,
+  onActiveSessionChange,
 }: {
   sessions: Session[],
   setSessions: any,
   focusedSessionId?: string | null,
   projectDir?: string | null,
+  onToggleGitPanel?: () => void,
+  onCopySession?: (title: string) => void,
+  onActiveSessionChange?: (id: string | null) => void,
 }) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(sessions[0]?.id || null);
   const [searchQuery, setSearchQuery] = useState('');
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+
+  // Notify parent of active session changes
+  useEffect(() => {
+    onActiveSessionChange?.(activeSessionId);
+  }, [activeSessionId]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -36,10 +47,17 @@ export function TabView({
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
 
-  const filteredSessions = sessions.filter(s => 
-    s.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+  const filteredSessions = sessions.filter(s =>
+    s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     s.messages.some(m => m.content.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  ).sort((a, b) => {
+    const lastTs = (s: Session) => {
+      if (s.messages.length === 0) return Infinity; // new sessions first
+      const last = s.messages[s.messages.length - 1];
+      return last.timestamp ?? 0;
+    };
+    return lastTs(b) - lastTs(a);
+  });
 
   return (
     <div className="w-full h-full flex">
@@ -158,6 +176,8 @@ export function TabView({
             fullScreen={true}
             variant="tab"
             projectDir={projectDir}
+            onToggleGitPanel={onToggleGitPanel}
+            onCopySession={onCopySession}
           />
         ) : (
           <div className="flex flex-col items-center justify-center w-full h-full text-gray-500 gap-4">

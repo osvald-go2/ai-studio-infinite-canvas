@@ -9,6 +9,7 @@ interface NewSessionModalProps {
   onCreate: (title: string, model: string, gitBranch: string, worktree: string, initialPrompt: string) => void;
   projectDir?: string | null;
   isGitRepo?: boolean;
+  defaultTitle?: string;
 }
 
 const ClaudeIcon = () => (
@@ -42,7 +43,7 @@ const MODELS = [
   { id: 'gemini-cli', name: 'Gemini CLI', icon: GeminiIcon },
 ];
 
-export function NewSessionModal({ isOpen, onClose, onCreate, projectDir, isGitRepo }: NewSessionModalProps) {
+export function NewSessionModal({ isOpen, onClose, onCreate, projectDir, isGitRepo, defaultTitle }: NewSessionModalProps) {
   const [title, setTitle] = useState('');
   const [model, setModel] = useState('claude-code');
   const [gitBranch, setGitBranch] = useState('main');
@@ -56,6 +57,14 @@ export function NewSessionModal({ isOpen, onClose, onCreate, projectDir, isGitRe
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [isCreatingWorktree, setIsCreatingWorktree] = useState(false);
   const [worktreeError, setWorktreeError] = useState<string | null>(null);
+
+  // Pre-fill title when defaultTitle is provided (e.g. copy session)
+  useEffect(() => {
+    if (isOpen && defaultTitle) {
+      setTitle(defaultTitle);
+      setGitBranch('main');
+    }
+  }, [isOpen, defaultTitle]);
 
   // Load branches when worktree mode is enabled
   useEffect(() => {
@@ -113,7 +122,7 @@ export function NewSessionModal({ isOpen, onClose, onCreate, projectDir, isGitRe
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
-      <div className="bg-[#3B3F4F]/80 backdrop-blur-2xl border border-white/[0.08] rounded-[24px] w-full max-w-xl shadow-2xl overflow-hidden flex flex-col">
+      <div className="bg-[#1E1814]/95 backdrop-blur-2xl border border-white/10 rounded-[24px] w-full max-w-xl shadow-2xl overflow-hidden flex flex-col">
         <div className="flex justify-between items-center px-7 pt-7 pb-2">
           <h2 className="text-xl font-semibold text-white">New Session</h2>
           <button onClick={onClose} className="w-9 h-9 rounded-full bg-white/[0.06] hover:bg-white/10 flex items-center justify-center text-gray-500 hover:text-gray-300 transition-colors">

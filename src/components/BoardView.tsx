@@ -23,11 +23,17 @@ export function BoardView({
   setSessions,
   focusedSessionId,
   projectDir,
+  onToggleGitPanel,
+  onCopySession,
+  onActiveSessionChange,
 }: {
   sessions: Session[],
   setSessions: any,
   focusedSessionId?: string | null,
   projectDir?: string | null,
+  onToggleGitPanel?: () => void,
+  onCopySession?: (title: string) => void,
+  onActiveSessionChange?: (id: string | null) => void,
 }) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [displaySession, setDisplaySession] = useState<Session | null>(null);
@@ -44,6 +50,11 @@ export function BoardView({
       return () => clearTimeout(timer);
     }
   }, [activeSessionId, sessions]);
+
+  // Notify parent of active session changes
+  useEffect(() => {
+    onActiveSessionChange?.(activeSessionId);
+  }, [activeSessionId]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -201,6 +212,12 @@ export function BoardView({
                         {session.worktree && session.worktree !== 'default' && (
                           <GitFork size={12} className="text-amber-400 shrink-0" />
                         )}
+                        {session.gitBranch && (
+                          <div className="flex items-center gap-1 shrink-0">
+                            <GitBranch size={11} className="text-orange-400" />
+                            <span className="text-[11px] font-mono text-orange-300 truncate max-w-[100px]">{session.gitBranch}</span>
+                          </div>
+                        )}
                       </div>
                       <div className="relative shrink-0">
                         <button
@@ -232,14 +249,21 @@ export function BoardView({
                         )}
                       </div>
                     </div>
-                    {session.gitBranch && session.gitBranch !== 'main' && (
-                      <div className="flex items-center gap-1 mb-2">
-                        <GitBranch size={11} className="text-orange-400" />
-                        <span className="text-[11px] font-mono text-orange-300 truncate">{session.gitBranch}</span>
-                      </div>
-                    )}
                     <p className="text-xs text-gray-400 line-clamp-2 mb-4">
-                      {session.messages[session.messages.length - 1]?.content || 'No messages yet.'}
+                      {(() => {
+                        for (let i = session.messages.length - 1; i >= 0; i--) {
+                          const msg = session.messages[i];
+                          if (msg.role !== 'assistant') continue;
+                          if (msg.blocks) {
+                            const textBlock = msg.blocks.find(
+                              b => b.type === 'text' && 'content' in b && b.content && !b.content.startsWith('Connected:')
+                            );
+                            if (textBlock && 'content' in textBlock) return textBlock.content;
+                          }
+                          if (msg.content && !msg.content.startsWith('Connected:')) return msg.content;
+                        }
+                        return 'No messages yet.';
+                      })()}
                     </p>
                     <div className="flex items-center justify-between mt-auto">
                       <span className="text-xs font-medium text-gray-400 bg-white/5 px-2 py-1 rounded-md">
@@ -294,6 +318,8 @@ export function BoardView({
                }}
                fullScreen={true}
                projectDir={projectDir}
+               onToggleGitPanel={onToggleGitPanel}
+               onCopySession={onCopySession}
              />
           </div>
         )}

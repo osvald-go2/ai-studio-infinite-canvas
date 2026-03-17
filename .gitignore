@@ -8,3 +8,42 @@ coverage/
 !.env.example
 .superpowers/
 MuMu/
+
+# AI tool configs
+.agent/
+.agents/
+.ai-studio/
+.claude/
+.codebuddy/
+.commandcode/
+.continue/
+.crush/
+.factory/
+.goose/
+.junie/
+.kilocode/
+.kiro/
+.kode/
+.mcpjam/
+.mux/
+.neovate/
+.openhands/
+.pi/
+.pochi/
+.qoder/
+.qwen/
+.roo/
+.trae/
+.windsurf/
+.zencoder/
+
+# Build & release artifacts
+out/
+release/
+demo-video/
+resources/
+
+# Misc
+skills/
+skills-lock.json
+macos-messages-icon.svg

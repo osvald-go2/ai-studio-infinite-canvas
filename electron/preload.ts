@@ -60,7 +60,31 @@ contextBridge.exposeInMainWorld('aiBackend', {
     });
   },
 
+  onBeforeQuit: (callback: () => void): void => {
+    ipcRenderer.on('app:before-quit', () => callback());
+  },
+
+  notifyFlushComplete: (): void => {
+    ipcRenderer.send('app:flush-complete');
+  },
+
   scanSkills: (platform: string, projectDir: string): Promise<any> => {
     return ipcRenderer.invoke('scan-skills', platform, projectDir);
+  },
+
+  // PTY API
+  ptySpawn: (cwd: string): Promise<number> => ipcRenderer.invoke('pty:spawn', cwd),
+  ptyWrite: (id: number, data: string): void => { ipcRenderer.send('pty:write', id, data); },
+  ptyResize: (id: number, cols: number, rows: number): void => { ipcRenderer.send('pty:resize', id, cols, rows); },
+  ptyKill: (id: number): Promise<void> => ipcRenderer.invoke('pty:kill', id),
+  onPtyData: (callback: (data: { id: number; data: string }) => void): (() => void) => {
+    const handler = (_: any, payload: any) => callback(payload);
+    ipcRenderer.on('pty:data', handler);
+    return () => ipcRenderer.removeListener('pty:data', handler);
+  },
+  onPtyExit: (callback: (data: { id: number; code: number }) => void): (() => void) => {
+    const handler = (_: any, payload: any) => callback(payload);
+    ipcRenderer.on('pty:exit', handler);
+    return () => ipcRenderer.removeListener('pty:exit', handler);
   },
 });

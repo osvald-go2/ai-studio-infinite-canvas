@@ -20,7 +20,7 @@ export function CodeBlock({ code, language }: { code: string, language: string }
         </button>
       </div>
       <div className="p-4 overflow-x-auto custom-scrollbar text-xs font-mono leading-relaxed">
-        <pre dangerouslySetInnerHTML={{ __html: highlight(code, language) }} />
+        <pre className="whitespace-pre" dangerouslySetInnerHTML={{ __html: highlight(code, language) }} />
       </div>
     </div>
   );

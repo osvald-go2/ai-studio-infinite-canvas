@@ -11,7 +11,32 @@ export interface MockResponse {
 }
 
 export const STRUCTURED_MOCK_RESPONSES: MockResponse[] = [
-  // Response 0: Showcase ALL 7 block types
+  // Response 0: Form table in chat (3 cols × 5 rows) — supermarket demo
+  {
+    blocks: [
+      { type: 'text', content: '以下是超市商品库存信息，请核对并编辑：' },
+      {
+        type: 'form_table',
+        title: '超市商品库存',
+        columns: [
+          { key: 'product', label: '商品名称', type: 'text' },
+          { key: 'price', label: '单价（元）', type: 'text' },
+          { key: 'category', label: '分类', type: 'select', options: ['生鲜果蔬', '乳制品', '粮油调味', '零食饮料', '日用百货'] },
+        ],
+        rows: [
+          { product: '有机西红柿', price: '8.90', category: '生鲜果蔬' },
+          { product: '伊利纯牛奶 1L', price: '12.50', category: '乳制品' },
+          { product: '金龙鱼菜籽油 5L', price: '59.90', category: '粮油调味' },
+          { product: '乐事薯片 原味', price: '7.50', category: '零食饮料' },
+          { product: '维达抽纸 3包装', price: '15.80', category: '日用百货' },
+        ],
+        submitLabel: '确认提交',
+      },
+      { type: 'text', content: '你可以直接在表格中编辑商品信息、添加或删除行，确认无误后点击提交。' },
+    ]
+  },
+
+  // Response 1: Showcase ALL 7 block types
   {
     blocks: [
       { type: 'text', content: '让我帮你完成这个任务。' },
@@ -121,12 +146,6 @@ export const STRUCTURED_MOCK_RESPONSES: MockResponse[] = [
     ]
   },
 
-  // Response 4: Simple markdown response (no blocks, tests fallback)
-  {
-    blocks: [
-      { type: 'text', content: '好的，我来帮你分析一下这个问题。\n\n### 整体架构\n\n这个项目使用了 React 19 + TypeScript + Vite 的技术栈，采用组件化设计，状态通过 props 从 App.tsx 向下传递。\n\n主要的改动点包括：\n\n1. 修改组件的 props 接口\n2. 添加新的状态管理逻辑\n3. 更新样式以匹配设计稿\n\n```tsx\ninterface SessionProps {\n  session: Session;\n  onUpdate: (s: Session) => void;\n  onClose?: () => void;\n}\n```\n\n> 建议在修改接口时保持向后兼容，使用可选属性。\n\n让我开始实现这些变更。' },
-    ]
-  },
 ];
 
 /** Plain text mock responses for backward compatibility */

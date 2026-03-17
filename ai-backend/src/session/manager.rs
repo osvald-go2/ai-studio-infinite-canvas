@@ -121,9 +121,16 @@ impl SessionManager {
                 active.codex_thread_id.clone()
             };
 
+            eprintln!("[codex] spawning codex in {}, resume_tid: {:?}", working_dir, resume_tid);
+
             let (process, event_rx, stderr_rx) =
                 CodexProcess::spawn(&working_dir, text, resume_tid.as_deref())
-                    .map_err(|e| SessionError::SpawnFailed(e))?;
+                    .map_err(|e| {
+                        eprintln!("[codex] spawn failed: {}", e);
+                        SessionError::SpawnFailed(e)
+                    })?;
+
+            eprintln!("[codex] process spawned successfully, pid: {}", process.pid());
 
             let process = Arc::new(process);
 
