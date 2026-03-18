@@ -7,6 +7,15 @@ interface AiBackend {
   openDirectory(): Promise<string | null>;
   getLastProjectDir(): Promise<string | null>;
   scanSkills(platform: string, projectDir: string): Promise<any>;
+
+  // Island integration
+  notifyIsland(event: string, data: any): void;
+  onIslandMessage(callback: (data: { sessionId: string; content: string }) => void): void;
+  onIslandCancel(callback: (data: { sessionId: string }) => void): void;
+  onIslandFetchMessages(callback: (data: { sessionId: string }) => void): void;
+  onIslandRequestSessions(callback: () => void): void;
+  sendIslandSessionsResponse(sessions: any[]): void;
+  sendIslandMessagesHistory(sessionId: string, messages: any[]): void;
 }
 
 interface Window {

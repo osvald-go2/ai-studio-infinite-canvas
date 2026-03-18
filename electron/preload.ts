@@ -87,4 +87,27 @@ contextBridge.exposeInMainWorld('aiBackend', {
     ipcRenderer.on('pty:exit', handler);
     return () => ipcRenderer.removeListener('pty:exit', handler);
   },
+
+  // Island integration
+  notifyIsland: (event: string, data: any) => {
+    ipcRenderer.send(`island:${event}`, data)
+  },
+  onIslandMessage: (callback: (data: { sessionId: string; content: string }) => void) => {
+    ipcRenderer.on('island:send-message', (_e, data) => callback(data))
+  },
+  onIslandCancel: (callback: (data: { sessionId: string }) => void) => {
+    ipcRenderer.on('island:cancel-session', (_e, data) => callback(data))
+  },
+  onIslandFetchMessages: (callback: (data: { sessionId: string }) => void) => {
+    ipcRenderer.on('island:fetch-messages', (_e, data) => callback(data))
+  },
+  onIslandRequestSessions: (callback: () => void) => {
+    ipcRenderer.on('island:request-sessions', () => callback())
+  },
+  sendIslandSessionsResponse: (sessions: any[]) => {
+    ipcRenderer.send('island:sessions-response', sessions)
+  },
+  sendIslandMessagesHistory: (sessionId: string, messages: any[]) => {
+    ipcRenderer.send('island:messages-history', { sessionId, messages })
+  },
 });
