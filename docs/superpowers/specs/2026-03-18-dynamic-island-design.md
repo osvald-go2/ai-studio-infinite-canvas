@@ -47,7 +47,10 @@
 
 两窗口通过 Main Process 中转通信（Renderer → ipcMain → Renderer）。
 
-**双窗口入口点**：electron-vite 配置两个 renderer 入口。Notch Window 加载 `notch.html`（渲染 NotchView 组件），Chat Window 加载 `chat.html`（渲染 ChatPanel 组件）。两个入口共享同一套组件和 hooks。
+**双窗口入口点**：electron-vite 配置两个 renderer 入口，各有独立的 HTML 和 TSX 入口文件：
+- Notch Window：`resources/notch.html` → `src/notch-main.tsx`（挂载 NotchView 组件）
+- Chat Window：`resources/chat.html` → `src/chat-main.tsx`（挂载 ChatPanel 组件）
+- 两个入口共享 `src/components/`、`src/hooks/`、`src/types.ts` 等模块
 
 **Chat Window 焦点丢失处理**：Chat Window 设置 `alwaysOnTop: false`，用户切换到其他应用时它会被覆盖。此时通知卡片（Notch Window）仍然可见，用户可以点击对应卡片的 "Open in chat" 按钮重新将 Chat Window 置前（调用 `chatWindow.show()` + `chatWindow.focus()`）。
 
@@ -91,7 +94,8 @@
 ### Hover 检测
 
 - **触发区域**：Notch Window 固定尺寸 600x120，胶囊态时整个窗口区域设置 `setIgnoreMouseEvents(true, { forward: true })`。在窗口中央放置一个 200x40px 的不可见 div（覆盖硬件刘海区域及其下方），通过 CSS `pointer-events: auto` 使其可接收鼠标事件。鼠标进入该 div 时触发 `mouseenter`，通过 IPC 通知 Main Process 切换到通知卡片态。
-- **通知卡片态**：取消 `ignoreMouseEvents`，整个窗口可交互，允许点击卡片按钮。
+- **状态切换时序**：Main Process 收到 hover 事件后，先调用 `setIgnoreMouseEvents(false)` 使窗口可交互，然后通过 IPC 通知 Renderer 开始展开动画。400ms 的展开动画自然覆盖了 `setIgnoreMouseEvents` 切换的时序间隙——动画期间卡片尚未完全出现，用户不会立即点击。
+- **通知卡片态**：`ignoreMouseEvents` 已关闭，整个窗口可交互，允许点击卡片按钮。
 - **聊天面板打开时**：通知卡片态不因鼠标离开而收起。
 - **鼠标离开判定**：监听 Notch Window 的 `mouseleave` 事件，启动 1.5s 定时器。若鼠标在定时器到期前重新进入窗口，取消定时器。
 
@@ -151,7 +155,8 @@
 
 ```typescript
 // 会话列表同步（连接时 + 变化时）
-{ type: "sessions:sync", sessions: Session[] }
+// 使用 IslandSession 精简类型，不包含 position/height 等 UI 字段和完整 messages 数组
+{ type: "sessions:sync", sessions: IslandSession[] }
 
 // 单个会话状态更新
 { type: "session:update", sessionId: string, status: SessionStatus, title: string }
@@ -185,9 +190,24 @@
 { type: "messages:fetch", sessionId: string }
 ```
 
-### TaskStep 类型定义
+### 共享类型定义
 
 ```typescript
+// 精简的会话信息，用于 Island 通知卡片展示
+// 从 AI Studio 的 Session 类型中提取，排除 position/height/messages 等 UI 和大体量字段
+interface IslandSession {
+  id: string;
+  title: string;
+  model: string;
+  status: SessionStatus;                      // "inbox" | "inprocess" | "review" | "done"
+  lastMessage?: string;                       // 最新一条消息的摘要文本
+  messageCount: number;
+}
+
+// 任务步骤，由 AI Studio 从 AI 响应中的 tool_call ContentBlock 合成
+// 当 AI 执行多步任务时（如"定位链接 → 下载文件 → 发送文件"），
+// AI Studio 解析 streaming 响应中的 tool_call blocks，
+// 将每个 tool_call 映射为一个 TaskStep，status 根据 tool_call.status 确定
 interface TaskStep {
   id: string;
   label: string;                              // 步骤描述，如 "定位原始研报链接"
@@ -198,7 +218,7 @@ interface TaskStep {
 
 ### 连接管理
 
-- Island 启动时连接 `ws://localhost:9720`
+- Island 启动时连接 `ws://localhost:${ISLAND_WS_PORT || 9720}`
 - 连接失败 → 3 秒后重试，无限重试
 - 连接成功 → Server 推送 `sessions:sync`
 - 断线 → 自动重连，重连后重新同步
@@ -220,8 +240,8 @@ dynamic-island/
 │   └── wsClient.ts                # WebSocket 客户端
 │
 ├── src/
-│   ├── main.tsx                   # Renderer 入口
-│   ├── App.tsx                    # 根组件
+│   ├── notch-main.tsx             # Notch Window renderer 入口
+│   ├── chat-main.tsx              # Chat Window renderer 入口
 │   │
 │   ├── components/
 │   │   ├── NotchView/
@@ -280,18 +300,25 @@ dynamic-island/
 
 在 AI Studio 中新增 `electron/islandServer.ts` 模块，由 `electron/main.ts` 在应用启动时调用。
 
+### 前提条件
+
+WebSocket Server 运行在 AI Studio 的 Electron Main Process 中，因此 **仅在 Electron 模式下可用**（`npm run dev:electron` 或打包后的应用）。纯 Web 模式（`npm run dev`）不启动 WebSocket Server，Island 应用将处于离线状态。
+
 ### islandServer.ts 职责
 
-1. **启动 WebSocket Server**：创建 `ws.Server` 监听 `ws://localhost:9720`（端口可通过环境变量 `ISLAND_WS_PORT` 覆盖）
-2. **会话状态同步**：客户端连接时，通过 IPC 从 Renderer 进程获取当前所有 Session 列表并推送 `sessions:sync`
+1. **启动 WebSocket Server**：创建 `ws.Server` 监听 `ws://localhost:9720`（端口可通过环境变量 `ISLAND_WS_PORT` 覆盖）。Island 客户端通过相同的环境变量或默认端口连接。
+2. **会话状态同步**：客户端连接时，通过 IPC invoke (`island:get-sessions`) 从 Renderer 进程获取当前所有 Session 列表，转换为 `IslandSession[]` 后推送 `sessions:sync`
 3. **事件监听与转发**：
-   - 监听 Renderer 进程通过 IPC 发来的会话状态变化事件（`session:updated`、`message:added`、`task:progressed`），转发给已连接的 Island 客户端
+   - 监听 Renderer 进程通过 IPC 发来的会话状态变化事件（`island:session-updated`、`island:message-added`、`island:task-progressed`），转发给已连接的 Island 客户端
    - AI Studio 的 SessionWindow 组件在调用 Gemini/Claude API 获得响应、状态变更时，需新增 IPC 事件发送到 Main Process
-4. **消息路由**：接收 Island 的 `message:send` 请求，通过 IPC 转发给 Renderer 进程，由对应 SessionWindow 的现有消息处理逻辑执行（调用 Gemini API 等）
-5. **取消任务**：接收 `session:cancel`，通过 IPC 通知对应 SessionWindow 中断当前请求
+4. **消息路由**：接收 Island 的 `message:send` 请求，通过 IPC send (`island:send-message`, { sessionId, content }) 发送到 Renderer 进程。Renderer 端在 App.tsx 中通过 `window.aiBackend.onIslandMessage()` 监听，找到对应的 session 并调用现有的消息发送逻辑（与用户在 SessionWindow 中输入消息相同的代码路径）。
+5. **取消任务**：接收 `session:cancel`，通过 IPC 通知 Renderer 进程中断对应 session 的当前请求
 
 ### AI Studio Renderer 端配合改动
 
-- `SessionWindow.tsx`：在消息发送、AI 响应到达、状态变更时，通过 `window.electronAPI.ipcRenderer.send()` 发送事件到 Main Process
-- `App.tsx`：在会话创建、删除、状态变更时发送事件到 Main Process
-- `preload.ts`：新增 Island 相关 IPC channel 的暴露
+- `SessionWindow.tsx`：在 AI 响应到达、状态变更时，调用 `window.aiBackend.notifyIsland('session-updated', data)` 发送事件到 Main Process
+- `App.tsx`：在会话创建、删除、状态变更时调用 `window.aiBackend.notifyIsland()`；监听 `window.aiBackend.onIslandMessage()` 处理 Island 发来的消息请求
+- `preload.ts`：在现有 `aiBackend` 对象上新增以下方法：
+  - `notifyIsland(event: string, data: any)` — 发送事件到 Main Process 的 islandServer
+  - `onIslandMessage(callback)` — 注册 Island 消息到达的回调
+  - `getSessionsForIsland()` — 返回精简的 IslandSession 列表
