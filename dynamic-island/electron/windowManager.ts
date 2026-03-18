@@ -1,0 +1,217 @@
+import { BrowserWindow, screen, ipcMain } from 'electron'
+import { join } from 'path'
+import { getInternalDisplay, getNotchHeight } from './notchDetector'
+
+type NotchState = 'capsule' | 'cards'
+
+const NOTCH_WIDTH = 600
+const NOTCH_HEIGHT = 140
+const CHAT_WIDTH = 420
+const CHAT_HEIGHT = 600
+const HOVER_POLL_INTERVAL = 100
+const HOVER_TRIGGER_WIDTH = 200
+const HOVER_TRIGGER_HEIGHT = 40
+const COLLAPSE_DELAY = 1500
+
+export class WindowManager {
+  private notchWindow: BrowserWindow | null = null
+  private chatWindow: BrowserWindow | null = null
+  private notchState: NotchState = 'capsule'
+  private hoverPollTimer: ReturnType<typeof setInterval> | null = null
+  private collapseTimer: ReturnType<typeof setTimeout> | null = null
+  private chatOpen = false
+  private activeChatSessionId: string | null = null
+
+  constructor(private preloadPath: string) {}
+
+  createWindows(): void {
+    const display = getInternalDisplay()
+    if (!display) return
+
+    const notchHeight = getNotchHeight(display)
+    const centerX = display.bounds.x + Math.round((display.bounds.width - NOTCH_WIDTH) / 2)
+
+    // Notch Window
+    this.notchWindow = new BrowserWindow({
+      width: NOTCH_WIDTH,
+      height: NOTCH_HEIGHT,
+      x: centerX,
+      y: display.bounds.y,
+      frame: false,
+      transparent: true,
+      alwaysOnTop: true,
+      resizable: false,
+      hasShadow: false,
+      focusable: false,
+      skipTaskbar: true,
+      hiddenInMissionControl: true,
+      fullscreenable: false,
+      type: 'panel',
+      backgroundColor: '#00000000',
+      webPreferences: {
+        preload: this.preloadPath,
+        contextIsolation: true,
+        nodeIntegration: false
+      }
+    })
+
+    this.notchWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    this.notchWindow.setIgnoreMouseEvents(true)
+    this.notchWindow.showInactive()
+
+    // Chat Window (hidden initially)
+    this.chatWindow = new BrowserWindow({
+      width: CHAT_WIDTH,
+      height: CHAT_HEIGHT,
+      x: display.bounds.x + Math.round((display.bounds.width - CHAT_WIDTH) / 2),
+      y: display.bounds.y + Math.round((display.bounds.height - CHAT_HEIGHT) / 2),
+      frame: false,
+      transparent: true,
+      alwaysOnTop: false,
+      resizable: false,
+      hasShadow: true,
+      show: false,
+      fullscreenable: false,
+      backgroundColor: '#00000000',
+      webPreferences: {
+        preload: this.preloadPath,
+        contextIsolation: true,
+        nodeIntegration: false
+      }
+    })
+
+    this.setupIPC()
+    this.startHoverPolling()
+  }
+
+  private setupIPC(): void {
+    ipcMain.on('notch:mouse-enter', () => {
+      if (this.collapseTimer) {
+        clearTimeout(this.collapseTimer)
+        this.collapseTimer = null
+      }
+    })
+
+    ipcMain.on('notch:mouse-leave', () => {
+      if (this.notchState === 'cards' && !this.chatOpen) {
+        this.collapseTimer = setTimeout(() => {
+          this.transitionTo('capsule')
+        }, COLLAPSE_DELAY)
+      }
+    })
+
+    ipcMain.on('chat:open', (_e, sessionId: string) => {
+      this.activeChatSessionId = sessionId
+      this.chatOpen = true
+      this.chatWindow?.webContents.send('chat:active-session', sessionId)
+      this.chatWindow?.show()
+      this.chatWindow?.focus()
+    })
+
+    ipcMain.on('chat:close', () => {
+      this.chatOpen = false
+      this.activeChatSessionId = null
+      this.chatWindow?.hide()
+    })
+  }
+
+  private startHoverPolling(): void {
+    if (this.hoverPollTimer) return
+
+    this.hoverPollTimer = setInterval(() => {
+      if (this.notchState !== 'capsule') return
+
+      const cursor = screen.getCursorScreenPoint()
+      const display = getInternalDisplay()
+      if (!display) return
+
+      const centerX = display.bounds.x + display.bounds.width / 2
+      const triggerLeft = centerX - HOVER_TRIGGER_WIDTH / 2
+      const triggerRight = centerX + HOVER_TRIGGER_WIDTH / 2
+      const triggerBottom = display.bounds.y + HOVER_TRIGGER_HEIGHT
+
+      if (
+        cursor.x >= triggerLeft &&
+        cursor.x <= triggerRight &&
+        cursor.y >= display.bounds.y &&
+        cursor.y <= triggerBottom
+      ) {
+        this.transitionTo('cards')
+      }
+    }, HOVER_POLL_INTERVAL)
+  }
+
+  private stopHoverPolling(): void {
+    if (this.hoverPollTimer) {
+      clearInterval(this.hoverPollTimer)
+      this.hoverPollTimer = null
+    }
+  }
+
+  private transitionTo(state: NotchState): void {
+    this.notchState = state
+
+    if (state === 'cards') {
+      this.stopHoverPolling()
+      this.notchWindow?.setIgnoreMouseEvents(false)
+      this.notchWindow?.webContents.send('notch:state-change', 'cards')
+    } else if (state === 'capsule') {
+      this.notchWindow?.setIgnoreMouseEvents(true)
+      this.notchWindow?.webContents.send('notch:state-change', 'capsule')
+      this.startHoverPolling()
+    }
+  }
+
+  /** Called when a new notification arrives — auto-expand from capsule */
+  expandForNotification(): void {
+    if (this.notchState === 'capsule') {
+      this.transitionTo('cards')
+      // Auto-collapse after 4 seconds if not interacted with
+      setTimeout(() => {
+        if (this.notchState === 'cards' && !this.chatOpen) {
+          this.transitionTo('capsule')
+        }
+      }, 4000)
+    }
+  }
+
+  /** Re-show chat window (e.g., when clicking "Open in chat" again) */
+  showChat(sessionId: string): void {
+    this.activeChatSessionId = sessionId
+    this.chatOpen = true
+    this.chatWindow?.webContents.send('chat:active-session', sessionId)
+    if (!this.chatWindow?.isVisible()) {
+      this.chatWindow?.show()
+    }
+    this.chatWindow?.focus()
+  }
+
+  /** Forward WebSocket messages to both renderers */
+  broadcastToRenderers(data: any): void {
+    this.notchWindow?.webContents.send('ws:message', data)
+    this.chatWindow?.webContents.send('ws:message', data)
+  }
+
+  /** Update connection status in both renderers */
+  setConnectionStatus(connected: boolean): void {
+    this.notchWindow?.webContents.send('ws:connection-status', connected)
+    this.chatWindow?.webContents.send('ws:connection-status', connected)
+  }
+
+  loadPages(notchURL: string, chatURL: string): void {
+    this.notchWindow?.loadURL(notchURL)
+    this.chatWindow?.loadURL(chatURL)
+  }
+
+  loadFiles(notchPath: string, chatPath: string): void {
+    this.notchWindow?.loadFile(notchPath)
+    this.chatWindow?.loadFile(chatPath)
+  }
+
+  destroy(): void {
+    this.stopHoverPolling()
+    if (this.collapseTimer) clearTimeout(this.collapseTimer)
+    this.notchWindow?.destroy()
+    this.chatWindow?.destroy()
+  }
+}
