@@ -6,6 +6,7 @@ import { execSync } from 'child_process';
 import Store from 'electron-store';
 import * as pty from 'node-pty';
 import { SidecarManager } from './sidecar';
+import { startIslandServer, stopIslandServer } from './islandServer';
 
 const store = new Store<{ anthropicApiKey?: string; lastProjectDir?: string }>();
 
@@ -372,6 +373,7 @@ app.whenReady().then(() => {
   }
   startSidecar();
   createWindow();
+  startIslandServer(mainWindow!);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -383,6 +385,7 @@ app.whenReady().then(() => {
 let isQuitting = false;
 
 app.on('before-quit', async (event) => {
+  stopIslandServer();
   if (isQuitting) return;
   event.preventDefault();
   isQuitting = true;
