@@ -11,6 +11,7 @@ const store = new Store<{ anthropicApiKey?: string; lastProjectDir?: string }>()
 
 let mainWindow: BrowserWindow | null = null;
 let sidecar: SidecarManager | null = null;
+let isQuitting = false;
 
 // PTY management
 const ptyProcesses = new Map<number, pty.IPty>();
@@ -39,6 +40,8 @@ function createWindow(): void {
     trafficLightPosition: { x: 16, y: 18 },
     backgroundColor: '#1A1A2E',
   });
+
+  mainWindow.maximize();
 
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -96,12 +99,13 @@ function startSidecar(): void {
   });
 
   sidecar.on('crashed', (code: number | null) => {
+    if (isQuitting) return;
     console.log(`[main] sidecar crashed with code ${code}, restarting...`);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('sidecar:event', 'sidecar.restarted', {});
     }
     setTimeout(() => {
-      if (sidecar) {
+      if (sidecar && !isQuitting) {
         sidecar.spawn(getSidecarEnv());
       }
     }, 1000);
@@ -119,6 +123,7 @@ const SLOW_METHOD_TIMEOUTS: Record<string, number> = {
 };
 
 ipcMain.handle('sidecar:invoke', async (_, method: string, params: any) => {
+  if (isQuitting) return null;
   if (!sidecar || !sidecar.isRunning()) {
     throw new Error('sidecar not running');
   }
@@ -379,8 +384,6 @@ app.whenReady().then(() => {
     }
   });
 });
-
-let isQuitting = false;
 
 app.on('before-quit', async (event) => {
   if (isQuitting) return;

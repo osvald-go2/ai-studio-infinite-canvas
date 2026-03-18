@@ -21,6 +21,7 @@ export function TopBar({
   onNewSession,
   sessions,
   onLocateSession,
+  searchInputRef,
   showGitPanel,
   onToggleGitPanel,
   showTerminal,
@@ -37,6 +38,7 @@ export function TopBar({
   onNewSession: () => void,
   sessions: Session[],
   onLocateSession: (id: string) => void,
+  searchInputRef?: React.RefObject<HTMLInputElement | null>,
   showGitPanel?: boolean,
   onToggleGitPanel?: () => void,
   showTerminal?: boolean,
@@ -213,9 +215,10 @@ export function TopBar({
         <div className="relative" ref={searchRef} style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input 
+            <input
+              ref={searchInputRef}
               type="text"
-              placeholder="Search sessions..."
+              placeholder="Search sessions...  ⌘K"
               value={searchQuery}
               onChange={(e) => {
                 setSearchQuery(e.target.value);

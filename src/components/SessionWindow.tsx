@@ -187,7 +187,8 @@ export function SessionWindow({
       blockMap.clear();
 
       // Detect real git changes in Electron mode
-      const workingDir = sessionRef.current.worktree ?? projectDir ?? null;
+      const wt = sessionRef.current.worktree;
+      const workingDir = (wt && wt !== 'default') ? wt : (projectDir ?? null);
       let hasChanges = false;
       let changeCount = 0;
       if (workingDir) {
@@ -1088,7 +1089,7 @@ export function SessionWindow({
               <button className={`rounded-full font-medium transition-colors ${
                 isTab ? 'bg-white/[0.1] px-2 py-0.5 text-[11px] text-gray-300 hover:text-white hover:bg-white/20' : 'bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white px-3 py-1.5 text-xs border border-white/5'
               }`}>
-                {isTab ? 'Claude' : 'Claude Opus 4.6'}
+                {session.model === 'codex' ? (isTab ? 'Codex' : 'Codex') : session.model === 'gemini-cli' ? (isTab ? 'Gemini' : 'Gemini CLI') : (isTab ? 'Claude' : 'Claude Code')}
               </button>
 
               {(totalAdditions > 0 || totalDeletions > 0) && (

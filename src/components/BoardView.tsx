@@ -26,6 +26,7 @@ export function BoardView({
   onToggleGitPanel,
   onCopySession,
   onActiveSessionChange,
+  onClearFocus,
 }: {
   sessions: Session[],
   setSessions: any,
@@ -34,6 +35,7 @@ export function BoardView({
   onToggleGitPanel?: () => void,
   onCopySession?: (title: string) => void,
   onActiveSessionChange?: (id: string | null) => void,
+  onClearFocus?: () => void,
 }) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [displaySession, setDisplaySession] = useState<Session | null>(null);
@@ -79,6 +81,8 @@ export function BoardView({
       if (cardElement) {
         cardElement.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
       }
+      const timer = setTimeout(() => onClearFocus?.(), 800);
+      return () => clearTimeout(timer);
     }
   }, [focusedSessionId]);
 

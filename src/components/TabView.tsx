@@ -12,6 +12,7 @@ export function TabView({
   onToggleGitPanel,
   onCopySession,
   onActiveSessionChange,
+  onClearFocus,
 }: {
   sessions: Session[],
   setSessions: any,
@@ -20,6 +21,7 @@ export function TabView({
   onToggleGitPanel?: () => void,
   onCopySession?: (title: string) => void,
   onActiveSessionChange?: (id: string | null) => void,
+  onClearFocus?: () => void,
 }) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(sessions[0]?.id || null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -42,6 +44,8 @@ export function TabView({
   useEffect(() => {
     if (focusedSessionId) {
       setActiveSessionId(focusedSessionId);
+      const timer = setTimeout(() => onClearFocus?.(), 800);
+      return () => clearTimeout(timer);
     }
   }, [focusedSessionId]);
 

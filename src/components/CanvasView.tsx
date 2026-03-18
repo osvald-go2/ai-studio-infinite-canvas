@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Session } from '../types';
 import { SessionWindow } from './SessionWindow';
-import { ZoomIn, ZoomOut, Maximize, Hand, MousePointer2, Send, Map, LayoutGrid } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize, Hand, MousePointer2, Send, Map, LayoutGrid, Plus, Mic, ArrowUp, Settings2 } from 'lucide-react';
 import { SESSION_WIDTH, SESSION_DEFAULT_HEIGHT, SESSION_MIN_HEIGHT, SESSION_GAP, START_X, START_Y } from '@/constants';
 
 export function CanvasView({
@@ -15,6 +15,8 @@ export function CanvasView({
   onToggleGitPanel,
   onCopySession,
   onActiveSessionChange,
+  onClearFocus,
+  onNewSession,
 }: {
   sessions: Session[],
   setSessions: any,
@@ -26,6 +28,8 @@ export function CanvasView({
   onToggleGitPanel?: () => void,
   onCopySession?: (title: string) => void,
   onActiveSessionChange?: (id: string | null) => void,
+  onClearFocus?: () => void,
+  onNewSession?: () => void,
 }) {
   const setTransform = onTransformChange;
   const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
@@ -113,16 +117,19 @@ export function CanvasView({
         const container = containerRef.current.getBoundingClientRect();
         const sessionWidth = SESSION_WIDTH;
         const sessionHeight = session.height ?? SESSION_DEFAULT_HEIGHT;
-        
+
         // Calculate new transform to center the session
         const newScale = 1; // Reset scale to 1 for better visibility
         const newX = (container.width / 2) - (session.position.x * newScale) - (sessionWidth / 2);
         const newY = (container.height / 2) - (session.position.y * newScale) - (sessionHeight / 2);
-        
+
         setTransform({ x: newX, y: newY, scale: newScale });
       }
+      // Clear focus after panning so the highlight doesn't persist
+      const timer = setTimeout(() => onClearFocus?.(), 800);
+      return () => clearTimeout(timer);
     }
-  }, [focusedSessionId, sessions]);
+  }, [focusedSessionId]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -397,40 +404,70 @@ export function CanvasView({
 
       {/* Broadcast Input Box */}
       <div
-        className={`absolute bottom-6 left-1/2 -translate-x-1/2 w-[600px] bg-[#3B3F4F]/95 backdrop-blur-2xl border border-white/20 rounded-2xl shadow-2xl p-4 z-50 flex flex-col gap-3 transition-all duration-300 ease-out ui-overlay ${
+        className={`absolute bottom-6 left-1/2 -translate-x-1/2 w-[660px] z-50 transition-all duration-300 ease-out ui-overlay ${
           selectedSessionIds.length >= 2
             ? 'opacity-100 translate-y-0 pointer-events-auto'
             : 'opacity-0 translate-y-8 pointer-events-none'
         }`}
         onMouseDown={e => e.stopPropagation()}
       >
-        <div className="flex justify-between items-center px-1">
-          <span className="text-sm font-medium text-blue-400">
-            Broadcasting to {selectedSessionIds.length} sessions
-          </span>
-          <button onClick={() => setSelectedSessionIds([])} className="text-xs text-gray-400 hover:text-white">Cancel</button>
-        </div>
-        <div className="relative">
-          <textarea
-            value={broadcastMessage}
-            onChange={(e) => setBroadcastMessage(e.target.value)}
-            placeholder="Message selected sessions..."
-            className="w-full bg-black/20 border border-white/10 rounded-xl pl-4 pr-12 py-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-none"
-            rows={3}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleBroadcast();
-              }
-            }}
-          />
-          <button 
-            onClick={handleBroadcast}
-            disabled={!broadcastMessage.trim() || selectedSessionIds.length < 2}
-            className="absolute right-3 bottom-3 p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg transition-colors"
-          >
-            <Send size={16} />
-          </button>
+        {/* Ambient glow behind the card */}
+        <div className="absolute -inset-[1px] rounded-2xl bg-gradient-to-r from-orange-400/20 via-orange-300/35 to-orange-400/20 blur-sm" />
+        <div className="absolute -inset-[1px] rounded-2xl bg-gradient-to-r from-orange-400/15 via-orange-300/25 to-orange-400/15" />
+
+        {/* Main card */}
+        <div className="relative bg-[#1E1E2E]/70 backdrop-blur-2xl rounded-2xl shadow-2xl overflow-hidden">
+          {/* Header bar */}
+          <div className="flex justify-between items-center px-4 pt-3 pb-1">
+            <span className="text-xs font-medium text-orange-300/80">
+              Broadcasting to {selectedSessionIds.length} sessions
+            </span>
+            <button onClick={() => setSelectedSessionIds([])} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
+              Cancel
+            </button>
+          </div>
+
+          {/* Textarea */}
+          <div className="px-4 pt-1">
+            <textarea
+              value={broadcastMessage}
+              onChange={(e) => setBroadcastMessage(e.target.value)}
+              placeholder="Message selected sessions..."
+              className="w-full bg-transparent text-sm text-white/90 placeholder-gray-500 focus:outline-none resize-none leading-relaxed"
+              rows={2}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleBroadcast();
+                }
+              }}
+            />
+          </div>
+
+          {/* Bottom toolbar */}
+          <div className="flex items-center justify-between px-4 pb-3 pt-1">
+            <div className="flex items-center gap-2">
+              <button className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors border border-white/5">
+                <Plus size={16} />
+              </button>
+              <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors border border-white/5 text-xs font-medium">
+                <Settings2 size={14} />
+                Tools
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <button className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-200 transition-colors hover:bg-white/5">
+                <Mic size={16} />
+              </button>
+              <button
+                onClick={handleBroadcast}
+                disabled={!broadcastMessage.trim() || selectedSessionIds.length < 2}
+                className="w-8 h-8 rounded-full bg-white/10 text-white hover:bg-white/20 disabled:bg-white/5 disabled:text-gray-500 flex items-center justify-center transition-colors border border-white/5"
+              >
+                <ArrowUp size={16} strokeWidth={2.5} />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -438,6 +475,7 @@ export function CanvasView({
       {showMinimap && sessions.length > 0 && (
         <CanvasMinimap
           sessions={sessions}
+          selectedSessionIds={selectedSessionIds}
           transform={transform}
           containerRef={containerRef}
           onNavigate={setTransform}
@@ -497,6 +535,16 @@ export function CanvasView({
           >
             <button
               onClick={() => {
+                onNewSession?.();
+                setContextMenu(null);
+              }}
+              className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-200 hover:bg-white/10 w-full transition-colors"
+            >
+              <Plus size={16} />
+              新建会话
+            </button>
+            <button
+              onClick={() => {
                 handleArrangeSessions();
                 setContextMenu(null);
               }}
@@ -527,11 +575,13 @@ const MODEL_COLORS: Record<string, string> = {
 
 function CanvasMinimap({
   sessions,
+  selectedSessionIds,
   transform,
   containerRef,
   onNavigate,
 }: {
   sessions: Session[];
+  selectedSessionIds: string[];
   transform: { x: number; y: number; scale: number };
   containerRef: React.RefObject<HTMLDivElement | null>;
   onNavigate: React.Dispatch<React.SetStateAction<{ x: number; y: number; scale: number }>>;
@@ -702,7 +752,8 @@ function CanvasMinimap({
             const pos = toMinimap(s.position.x, s.position.y);
             const w = SESSION_WIDTH * minimapScale;
             const h = (s.height ?? SESSION_DEFAULT_HEIGHT) * minimapScale;
-            const color = MODEL_COLORS[s.model] || '#94a3b8';
+            const isSelected = selectedSessionIds.includes(s.id);
+            const color = isSelected ? '#3b82f6' : (MODEL_COLORS[s.model] || '#94a3b8');
             return (
               <rect
                 key={s.id}
@@ -712,10 +763,10 @@ function CanvasMinimap({
                 height={h}
                 rx={2}
                 fill={color}
-                fillOpacity={0.5}
+                fillOpacity={isSelected ? 0.7 : 0.5}
                 stroke={color}
-                strokeOpacity={0.8}
-                strokeWidth={1}
+                strokeOpacity={isSelected ? 1 : 0.8}
+                strokeWidth={isSelected ? 1.5 : 1}
               />
             );
           })}

@@ -13,6 +13,7 @@ import { GitReviewPanel } from './components/git/GitReviewPanel';
 import { GitPanel } from './components/git/GitPanel';
 import { TerminalPanel } from './components/terminal/TerminalPanel';
 import { GitProvider } from './contexts/GitProvider';
+import { HomePage } from './components/HomePage';
 import { Session, SessionStatus, DbProject, DbSession } from './types';
 import { backend } from './services/backend';
 import { gitService } from './services/git';
@@ -87,6 +88,7 @@ function findNextGridPosition(
 }
 
 export default function App() {
+  const [showHomePage, setShowHomePage] = useState(true);
   const [viewMode, setViewMode] = useState<'canvas' | 'board' | 'tab'>('canvas');
   const [sessions, setSessions] = useState<Session[]>(initialSessions);
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
@@ -123,17 +125,49 @@ export default function App() {
     ? activeSession.worktree
     : projectDir ?? '';
 
-  // Keyboard shortcut: Ctrl/Cmd + ` to toggle terminal
+  // Ref for focusing the search input in TopBar
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore shortcuts when typing in input/textarea
+      const tag = (e.target as HTMLElement).tagName;
+      const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable;
+
       if ((e.ctrlKey || e.metaKey) && e.key === '`') {
         e.preventDefault();
         setShowTerminal(v => !v);
+        return;
+      }
+
+      // Cmd+N — New session
+      if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+        e.preventDefault();
+        setIsNewModalOpen(true);
+        return;
+      }
+
+      // Cmd+K — Focus search
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+
+      // Cmd+1~9 — Switch to session by index
+      if ((e.ctrlKey || e.metaKey) && !isInput && e.key >= '1' && e.key <= '9') {
+        e.preventDefault();
+        const index = parseInt(e.key) - 1;
+        if (index < sessions.length) {
+          setFocusedSessionId(sessions[index].id);
+        }
+        return;
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [sessions]);
 
   // Re-check git repo status when projectDir changes
   useEffect(() => {
@@ -166,6 +200,7 @@ export default function App() {
     setViewMode(project.view_mode as 'canvas' | 'board' | 'tab');
     setCanvasTransform({ x: project.canvas_x, y: project.canvas_y, scale: project.canvas_zoom });
     setProjectDir(project.path);
+    setShowHomePage(false);
 
     // Refresh projects list
     backend.listProjects().then(setProjects).catch(() => {});
@@ -245,23 +280,21 @@ export default function App() {
     }
   }, [isSwitchingProject, currentProject, viewMode, canvasTransform, sessions, projects, flushSessionSaves, applyProject]);
 
-  // Load project and sessions from backend on mount
+  // Load project list and show homepage on mount
   useEffect(() => {
     if (!isElectronApp) return;
 
-    const initProject = async () => {
+    const init = async () => {
       try {
-        const cwd = await (window as any).aiBackend.getWorkingDir();
-        const project = await backend.openProject(cwd);
-        if (!project) return;
-
-        await applyProject(project);
+        // Load projects list for the homepage
+        const projectList = await backend.listProjects();
+        setProjects(projectList);
       } catch (e) {
-        console.error('Failed to load project:', e);
+        console.error('Failed to load projects:', e);
       }
     };
 
-    initProject();
+    init();
   }, []);
 
   // Auto-save sessions to backend (debounced)
@@ -404,6 +437,9 @@ export default function App() {
       };
       backend.saveSession(dbSession).catch(console.error);
     }
+
+    // Auto-pan canvas to the newly created session
+    setFocusedSessionId(newSession.id);
   };
 
   const handleCopySession = (title: string) => {
@@ -446,20 +482,35 @@ export default function App() {
     }
   };
 
+  // Homepage: show when no project is open
+  if (showHomePage) {
+    return (
+      <div className="w-screen h-screen overflow-hidden text-white font-sans relative">
+        <HomePage
+          projects={projects}
+          onOpenDirectory={handleOpenDirectory}
+          onSwitchProject={switchProject}
+          onNewSession={() => { setShowHomePage(false); setIsNewModalOpen(true); }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="w-screen h-screen overflow-hidden bg-[#1A1A2E] text-white font-sans flex flex-col relative">
       {/* Background Image */}
-      <div 
+      <div
         className="absolute inset-0 z-0 bg-cover bg-center opacity-40"
         style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop)' }}
       />
-      
+
       <TopBar
         viewMode={viewMode}
         setViewMode={setViewMode}
         onNewSession={() => setIsNewModalOpen(true)}
         sessions={sessions}
         onLocateSession={handleLocateSession}
+        searchInputRef={searchInputRef}
         showGitPanel={showGitPanel}
         onToggleGitPanel={() => setShowGitPanel((v) => !v)}
         showTerminal={showTerminal}
@@ -489,6 +540,8 @@ export default function App() {
                   onToggleGitPanel={() => setShowGitPanel(true)}
                   onCopySession={handleCopySession}
                   onActiveSessionChange={(id) => setActiveSessionId(id)}
+                  onClearFocus={() => setFocusedSessionId(null)}
+                  onNewSession={() => setIsNewModalOpen(true)}
                 />
               ) : viewMode === 'board' ? (
                 <BoardView
@@ -499,6 +552,7 @@ export default function App() {
                   onToggleGitPanel={() => setShowGitPanel(true)}
                   onCopySession={handleCopySession}
                   onActiveSessionChange={(id) => setActiveSessionId(id)}
+                  onClearFocus={() => setFocusedSessionId(null)}
                 />
               ) : (
                 <TabView
@@ -509,6 +563,7 @@ export default function App() {
                   onToggleGitPanel={() => setShowGitPanel(true)}
                   onCopySession={handleCopySession}
                   onActiveSessionChange={(id) => setActiveSessionId(id)}
+                  onClearFocus={() => setFocusedSessionId(null)}
                 />
               )}
             </div>

@@ -142,9 +142,15 @@ export function GitProvider({ projectDir, overrideDir, children }: GitProviderPr
         gitService.branches(dir),
         gitService.worktrees(dir),
       ]);
-      setState(prev => ({ ...prev, branches, worktrees }));
+      // Override is_current based on active session's worktree (overrideDir)
+      const activeWt = overrideDir || projectDir;
+      const adjusted = worktrees.map(wt => ({
+        ...wt,
+        is_current: activeWt ? wt.path === activeWt : wt.is_current,
+      }));
+      setState(prev => ({ ...prev, branches, worktrees: adjusted }));
     } catch { /* unavailable */ }
-  }, [dir]);
+  }, [dir, overrideDir, projectDir]);
 
   const refreshLog = useCallback(async () => {
     if (!dir || !isElectron()) return;
@@ -172,13 +178,19 @@ export function GitProvider({ projectDir, overrideDir, children }: GitProviderPr
         setState(prev => ({ ...prev, isRepo: false, loading: false }));
         return;
       }
-      const [info, changes, branches, worktrees, log] = await Promise.all([
+      const [info, changes, branches, rawWorktrees, log] = await Promise.all([
         gitService.info(dir).catch(() => defaultInfo),
         gitService.changes(dir).catch(() => [] as FileChange[]),
         gitService.branches(dir).catch(() => [] as BranchInfo[]),
         gitService.worktrees(dir).catch(() => [] as WorktreeInfo[]),
         gitService.log(dir, 50).catch(() => [] as CommitInfo[]),
       ]);
+      // Override is_current based on active session's worktree (overrideDir)
+      const activeWt = overrideDir || projectDir;
+      const worktrees = rawWorktrees.map(wt => ({
+        ...wt,
+        is_current: activeWt ? wt.path === activeWt : wt.is_current,
+      }));
       setState({
         isRepo: true,
         info,
@@ -192,7 +204,7 @@ export function GitProvider({ projectDir, overrideDir, children }: GitProviderPr
     } catch {
       setState(prev => ({ ...prev, loading: false }));
     }
-  }, [dir]);
+  }, [dir, overrideDir, projectDir]);
 
   useEffect(() => {
     if (!dir) {
