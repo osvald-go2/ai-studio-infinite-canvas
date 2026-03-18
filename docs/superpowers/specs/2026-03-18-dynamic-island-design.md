@@ -7,7 +7,7 @@
 ## 核心需求
 
 - 独立 Electron 应用，与 AI Studio 分离运行
-- 仅支持有硬件刘海的 MacBook（M1 Pro/Max 及之后机型）
+- 仅支持有硬件刘海的 MacBook（M1 Pro/Max 及之后机型）。不支持的机型（无刘海 Mac 或外接显示器）启动时提示不兼容并退出
 - 三层交互状态：胶囊态 → 通知卡片态 → 液态玻璃聊天面板
 - WebSocket 长连接与 AI Studio 实时同步会话数据
 
@@ -46,6 +46,10 @@
 - **Chat Window**：屏幕中央弹出，负责液态玻璃聊天面板。`alwaysOnTop: false`、`transparent: true`、`frame: false`。可被其他窗口覆盖，用户可自然切换应用。
 
 两窗口通过 Main Process 中转通信（Renderer → ipcMain → Renderer）。
+
+**双窗口入口点**：electron-vite 配置两个 renderer 入口。Notch Window 加载 `notch.html`（渲染 NotchView 组件），Chat Window 加载 `chat.html`（渲染 ChatPanel 组件）。两个入口共享同一套组件和 hooks。
+
+**Chat Window 焦点丢失处理**：Chat Window 设置 `alwaysOnTop: false`，用户切换到其他应用时它会被覆盖。此时通知卡片（Notch Window）仍然可见，用户可以点击对应卡片的 "Open in chat" 按钮重新将 Chat Window 置前（调用 `chatWindow.show()` + `chatWindow.focus()`）。
 
 ## 三层状态与交互流程
 
@@ -86,9 +90,10 @@
 
 ### Hover 检测
 
-- 胶囊态：`setIgnoreMouseEvents(true, { forward: true })`，通过透明 hover 触发区域监听 `mouse-enter`
-- 通知卡片态：取消 `ignoreMouseEvents`，允许点击卡片按钮
-- 聊天面板打开时：通知卡片态不因鼠标离开而收起
+- **触发区域**：Notch Window 固定尺寸 600x120，胶囊态时整个窗口区域设置 `setIgnoreMouseEvents(true, { forward: true })`。在窗口中央放置一个 200x40px 的不可见 div（覆盖硬件刘海区域及其下方），通过 CSS `pointer-events: auto` 使其可接收鼠标事件。鼠标进入该 div 时触发 `mouseenter`，通过 IPC 通知 Main Process 切换到通知卡片态。
+- **通知卡片态**：取消 `ignoreMouseEvents`，整个窗口可交互，允许点击卡片按钮。
+- **聊天面板打开时**：通知卡片态不因鼠标离开而收起。
+- **鼠标离开判定**：监听 Notch Window 的 `mouseleave` 事件，启动 1.5s 定时器。若鼠标在定时器到期前重新进入窗口，取消定时器。
 
 ## Notch Window — 通知卡片设计
 
@@ -112,7 +117,7 @@
 
 ### 溢出处理
 
-任务超过 3 个时，卡片区域横向滚动或显示 "+N more" 折叠指示器。
+任务超过 3 个时，显示前 3 个卡片 + 右侧 "+N more" 折叠指示器。点击指示器展开为横向滚动模式显示所有卡片。
 
 ## Chat Window — 液态玻璃聊天面板
 
@@ -159,6 +164,9 @@
 
 // 通知事件
 { type: "notification", sessionId: string, level: "success"|"error"|"info", text: string }
+
+// 消息历史响应（响应 Island 的 messages:fetch 请求）
+{ type: "messages:history", sessionId: string, messages: Message[] }
 ```
 
 ### Island → AI Studio（请求）
@@ -175,9 +183,17 @@
 
 // 请求完整消息历史
 { type: "messages:fetch", sessionId: string }
+```
 
-// 响应
-{ type: "messages:history", sessionId: string, messages: Message[] }
+### TaskStep 类型定义
+
+```typescript
+interface TaskStep {
+  id: string;
+  label: string;                              // 步骤描述，如 "定位原始研报链接"
+  status: "pending" | "running" | "completed" | "failed";
+  detail?: string;                            // 可选详情，如错误信息
+}
 ```
 
 ### 连接管理
@@ -229,7 +245,8 @@ dynamic-island/
 │       └── liquid-glass.css       # 液态玻璃样式
 │
 └── resources/
-    └── notch.html                 # Notch Window HTML 入口
+    ├── notch.html                 # Notch Window HTML 入口（加载 NotchView）
+    └── chat.html                  # Chat Window HTML 入口（加载 ChatPanel）
 ```
 
 ## 技术选型
@@ -261,9 +278,20 @@ dynamic-island/
 
 ## AI Studio 端改动
 
-在 AI Studio 的 `electron/main.ts` 中新增 WebSocket Server：
+在 AI Studio 中新增 `electron/islandServer.ts` 模块，由 `electron/main.ts` 在应用启动时调用。
 
-1. 启动时创建 `ws.Server` 监听 9720 端口
-2. 客户端连接时推送当前所有会话状态
-3. 会话状态变化、新消息、任务进度更新时主动推送
-4. 接收 Island 发来的消息转发请求，调用现有消息处理逻辑
+### islandServer.ts 职责
+
+1. **启动 WebSocket Server**：创建 `ws.Server` 监听 `ws://localhost:9720`（端口可通过环境变量 `ISLAND_WS_PORT` 覆盖）
+2. **会话状态同步**：客户端连接时，通过 IPC 从 Renderer 进程获取当前所有 Session 列表并推送 `sessions:sync`
+3. **事件监听与转发**：
+   - 监听 Renderer 进程通过 IPC 发来的会话状态变化事件（`session:updated`、`message:added`、`task:progressed`），转发给已连接的 Island 客户端
+   - AI Studio 的 SessionWindow 组件在调用 Gemini/Claude API 获得响应、状态变更时，需新增 IPC 事件发送到 Main Process
+4. **消息路由**：接收 Island 的 `message:send` 请求，通过 IPC 转发给 Renderer 进程，由对应 SessionWindow 的现有消息处理逻辑执行（调用 Gemini API 等）
+5. **取消任务**：接收 `session:cancel`，通过 IPC 通知对应 SessionWindow 中断当前请求
+
+### AI Studio Renderer 端配合改动
+
+- `SessionWindow.tsx`：在消息发送、AI 响应到达、状态变更时，通过 `window.electronAPI.ipcRenderer.send()` 发送事件到 Main Process
+- `App.tsx`：在会话创建、删除、状态变更时发送事件到 Main Process
+- `preload.ts`：新增 Island 相关 IPC channel 的暴露
