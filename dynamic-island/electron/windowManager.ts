@@ -9,9 +9,9 @@ const NOTCH_HEIGHT = 140
 const CHAT_WIDTH = 420
 const CHAT_HEIGHT = 600
 const HOVER_POLL_INTERVAL = 100
-const HOVER_TRIGGER_WIDTH = 200
-const HOVER_TRIGGER_HEIGHT = 40
-const COLLAPSE_DELAY = 1500
+const HOVER_TRIGGER_WIDTH = 400
+const HOVER_TRIGGER_HEIGHT = 80
+const COLLAPSE_DELAY = 500
 
 export class WindowManager {
   private notchWindow: BrowserWindow | null = null
@@ -118,17 +118,28 @@ export class WindowManager {
   private startHoverPolling(): void {
     if (this.hoverPollTimer) return
 
+    let logCount = 0
     this.hoverPollTimer = setInterval(() => {
       if (this.notchState !== 'capsule') return
 
       const cursor = screen.getCursorScreenPoint()
       const display = getInternalDisplay()
-      if (!display) return
+      if (!display) {
+        if (logCount === 0) console.log('[Hover] No internal display found!')
+        logCount++
+        return
+      }
 
       const centerX = display.bounds.x + display.bounds.width / 2
       const triggerLeft = centerX - HOVER_TRIGGER_WIDTH / 2
       const triggerRight = centerX + HOVER_TRIGGER_WIDTH / 2
       const triggerBottom = display.bounds.y + HOVER_TRIGGER_HEIGHT
+
+      // Log once every 5 seconds for debugging
+      if (logCount % 50 === 0) {
+        console.log(`[Hover] cursor: (${cursor.x}, ${cursor.y}) trigger: x[${triggerLeft}-${triggerRight}] y[${display.bounds.y}-${triggerBottom}]`)
+      }
+      logCount++
 
       if (
         cursor.x >= triggerLeft &&
@@ -136,6 +147,7 @@ export class WindowManager {
         cursor.y >= display.bounds.y &&
         cursor.y <= triggerBottom
       ) {
+        console.log('[Hover] TRIGGERED! Switching to cards')
         this.transitionTo('cards')
       }
     }, HOVER_POLL_INTERVAL)
@@ -153,11 +165,15 @@ export class WindowManager {
 
     if (state === 'cards') {
       this.stopHoverPolling()
-      this.notchWindow?.setIgnoreMouseEvents(false)
-      this.notchWindow?.webContents.send('notch:state-change', 'cards')
+      if (this.notchWindow && !this.notchWindow.isDestroyed()) {
+        this.notchWindow.setIgnoreMouseEvents(false)
+      }
+      this.safeSend(this.notchWindow, 'notch:state-change', 'cards')
     } else if (state === 'capsule') {
-      this.notchWindow?.setIgnoreMouseEvents(true)
-      this.notchWindow?.webContents.send('notch:state-change', 'capsule')
+      if (this.notchWindow && !this.notchWindow.isDestroyed()) {
+        this.notchWindow.setIgnoreMouseEvents(true)
+      }
+      this.safeSend(this.notchWindow, 'notch:state-change', 'capsule')
       this.startHoverPolling()
     }
   }
@@ -186,16 +202,22 @@ export class WindowManager {
     this.chatWindow?.focus()
   }
 
+  private safeSend(win: BrowserWindow | null, channel: string, ...args: any[]): void {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send(channel, ...args)
+    }
+  }
+
   /** Forward WebSocket messages to both renderers */
   broadcastToRenderers(data: any): void {
-    this.notchWindow?.webContents.send('ws:message', data)
-    this.chatWindow?.webContents.send('ws:message', data)
+    this.safeSend(this.notchWindow, 'ws:message', data)
+    this.safeSend(this.chatWindow, 'ws:message', data)
   }
 
   /** Update connection status in both renderers */
   setConnectionStatus(connected: boolean): void {
-    this.notchWindow?.webContents.send('ws:connection-status', connected)
-    this.chatWindow?.webContents.send('ws:connection-status', connected)
+    this.safeSend(this.notchWindow, 'ws:connection-status', connected)
+    this.safeSend(this.chatWindow, 'ws:connection-status', connected)
   }
 
   loadPages(notchURL: string, chatURL: string): void {

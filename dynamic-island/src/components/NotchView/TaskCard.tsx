@@ -4,6 +4,7 @@ import type { IslandSession } from '@/types'
 
 interface TaskCardProps {
   session: IslandSession
+  index: number
   onOpenChat: (sessionId: string) => void
   onCancel: (sessionId: string) => void
   onDismiss: (sessionId: string) => void
@@ -40,27 +41,30 @@ const statusConfig = {
   }
 } as const
 
-export function TaskCard({ session, onOpenChat, onCancel, onDismiss }: TaskCardProps) {
+export function TaskCard({ session, index, onOpenChat, onCancel, onDismiss }: TaskCardProps) {
   const config = statusConfig[session.status]
   const Icon = config.icon
 
   return (
     <motion.div
-      layout
-      initial={{ opacity: 0, x: 50 }}
+      initial={{ opacity: 0, x: 30 }}
       animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, scaleX: 0 }}
-      transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-      className="flex-1 min-w-[160px] relative rounded-[14px] p-3"
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{
+        duration: 0.3,
+        delay: index * 0.05,
+        ease: [0.16, 1, 0.3, 1],
+      }}
+      className="w-[240px] flex-shrink-0 relative rounded-[14px] p-3"
       style={{
         background: config.bg,
-        border: `1px solid ${config.border}`
+        border: `1px solid ${config.border}`,
       }}
     >
       {/* Close button */}
       <button
         onClick={() => onDismiss(session.id)}
-        className="absolute top-2 right-2 w-4 h-4 rounded-full flex items-center justify-center"
+        className="absolute top-2 right-2 w-4 h-4 rounded-full flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
         style={{ background: 'rgba(255,255,255,0.2)' }}
       >
         <X size={10} color="#888" />
@@ -79,7 +83,7 @@ export function TaskCard({ session, onOpenChat, onCancel, onDismiss }: TaskCardP
           />
         </div>
         <span
-          className="text-[11px] font-bold truncate max-w-[120px]"
+          className="text-[11px] font-bold truncate max-w-[160px]"
           style={{ color: config.color }}
         >
           {session.title}

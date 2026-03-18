@@ -51,3 +51,13 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
 }
+
+/* Hide scrollbar for notch horizontal scroll */
+.notch-scroll-container {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.notch-scroll-container::-webkit-scrollbar {
+  display: none;
+}

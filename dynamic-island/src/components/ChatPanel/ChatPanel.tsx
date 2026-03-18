@@ -5,6 +5,10 @@ import { TaskProgress } from './TaskProgress'
 import { InputBar } from './InputBar'
 import { useIslandStore } from '@/hooks/useIslandStore'
 
+// Trapezoid (narrow top, wide bottom) → full rectangle
+const CLIP_TRAPEZOID = 'polygon(30% 0%, 70% 0%, 100% 100%, 0% 100%)'
+const CLIP_RECTANGLE = 'polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)'
+
 export function ChatPanel() {
   const {
     sessions,
@@ -22,7 +26,6 @@ export function ChatPanel() {
   const steps = activeChatSessionId ? taskSteps[activeChatSessionId] || [] : []
   const isProcessing = session?.status === 'inprocess'
 
-  // streamingText is keyed by sessionId
   const activeStreamingText = activeChatSessionId
     ? streamingText[activeChatSessionId]
     : undefined
@@ -31,10 +34,30 @@ export function ChatPanel() {
     <AnimatePresence>
       {session && (
         <motion.div
-          initial={{ opacity: 0, scale: 0.92 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.95 }}
-          transition={{ duration: 0.3, ease: [0.34, 1.56, 0.64, 1] }}
+          initial={{
+            opacity: 0,
+            scaleY: 0.3,
+            scaleX: 0.8,
+            clipPath: CLIP_TRAPEZOID,
+          }}
+          animate={{
+            opacity: 1,
+            scaleY: 1,
+            scaleX: 1,
+            clipPath: CLIP_RECTANGLE,
+          }}
+          exit={{
+            opacity: 0,
+            scaleY: 0.3,
+            scaleX: 0.8,
+            clipPath: CLIP_TRAPEZOID,
+          }}
+          transition={{
+            duration: 0.45,
+            ease: [0.32, 0.72, 0, 1],
+            clipPath: { duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] },
+          }}
+          style={{ transformOrigin: 'top center' }}
           className="liquid-glass w-full h-full flex flex-col"
         >
           <TitleBar
