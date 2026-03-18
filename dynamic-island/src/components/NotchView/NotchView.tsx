@@ -26,7 +26,7 @@ export function NotchView() {
   return (
     <div
       className="w-full h-full select-none"
-      style={{ background: 'transparent' }}
+      style={{ background: '#000' }}
       onMouseEnter={() => window.island.notifyMouseEnter()}
       onMouseLeave={() => window.island.notifyMouseLeave()}
     >

@@ -10,8 +10,13 @@ let wsClient: WsClient | null = null
 app.dock?.hide()
 
 app.whenReady().then(() => {
+  console.log('[Island] App ready, checking hardware...')
+
   // Check hardware compatibility
-  if (!hasHardwareNotch()) {
+  const notchSupported = hasHardwareNotch()
+  console.log('[Island] Hardware notch supported:', notchSupported)
+
+  if (!notchSupported) {
     dialog.showErrorBox(
       'Not Supported',
       'Dynamic Island requires a MacBook with a hardware notch (M1 Pro/Max or later).'
@@ -20,7 +25,8 @@ app.whenReady().then(() => {
     return
   }
 
-  const preloadPath = join(__dirname, '../preload/index.mjs')
+  const preloadPath = join(__dirname, '../preload/index.js')
+  console.log('[Island] Preload path:', preloadPath)
 
   // Create windows
   windowManager = new WindowManager(preloadPath)
@@ -29,12 +35,15 @@ app.whenReady().then(() => {
   // In dev mode, load from vite dev server
   if (process.env.ELECTRON_RENDERER_URL) {
     const baseURL = process.env.ELECTRON_RENDERER_URL
-    windowManager.loadPages(`${baseURL}/notch.html`, `${baseURL}/chat.html`)
+    const notchURL = `${baseURL}/resources/notch.html`
+    const chatURL = `${baseURL}/resources/chat.html`
+    console.log('[Island] Loading dev URLs:', notchURL, chatURL)
+    windowManager.loadPages(notchURL, chatURL)
   } else {
-    windowManager.loadFiles(
-      join(__dirname, '../renderer/notch.html'),
-      join(__dirname, '../renderer/chat.html')
-    )
+    const notchPath = join(__dirname, '../renderer/resources/notch.html')
+    const chatPath = join(__dirname, '../renderer/resources/chat.html')
+    console.log('[Island] Loading files:', notchPath, chatPath)
+    windowManager.loadFiles(notchPath, chatPath)
   }
 
   // Connect to AI Studio

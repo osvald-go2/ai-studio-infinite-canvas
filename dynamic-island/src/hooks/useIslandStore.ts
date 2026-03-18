@@ -19,9 +19,16 @@ interface IslandState {
   activeChatSessionId: string | null
 }
 
+// Mock sessions for development
+const MOCK_SESSIONS: IslandSession[] = [
+  { id: '1', title: '下载推文中的研报原文', model: 'GPT-5.4', status: 'done', lastMessage: 'Task has been completed', messageCount: 3 },
+  { id: '2', title: '下载 X 帖子里的研报', model: 'Claude', status: 'inprocess', lastMessage: '定位原始研报链接', messageCount: 5 },
+  { id: '3', title: '数据分析报告', model: 'Gemini', status: 'inbox', lastMessage: '等待中', messageCount: 0 }
+]
+
 export function useIslandStore() {
   const [state, setState] = useState<IslandState>({
-    sessions: [],
+    sessions: MOCK_SESSIONS,
     notifications: [],
     messages: {},
     streamingText: {},
