@@ -324,6 +324,61 @@ export default function App() {
     });
   }, [flushSessionSaves]);
 
+  // Island integration — session-independent listeners (register once)
+  useEffect(() => {
+    if (!window.aiBackend) return
+
+    // Handle message send from Island
+    window.aiBackend.onIslandMessage(({ sessionId, content }) => {
+      const event = new CustomEvent('island:send-message', {
+        detail: { sessionId, content }
+      })
+      window.dispatchEvent(event)
+    })
+
+    // Handle cancel from Island
+    window.aiBackend.onIslandCancel(({ sessionId }) => {
+      const event = new CustomEvent('island:cancel-session', {
+        detail: { sessionId }
+      })
+      window.dispatchEvent(event)
+    })
+  }, [])
+
+  // Island integration — session-dependent listeners
+  useEffect(() => {
+    if (!window.aiBackend) return
+
+    // Respond to session list requests from Island
+    window.aiBackend.onIslandRequestSessions(() => {
+      const islandSessions = sessionsRef.current.map(s => ({
+        id: s.id,
+        title: s.title,
+        model: s.model,
+        status: s.status,
+        lastMessage: s.messages.length > 0
+          ? s.messages[s.messages.length - 1].content.slice(0, 100)
+          : undefined,
+        messageCount: s.messages.length
+      }))
+      window.aiBackend.sendIslandSessionsResponse(islandSessions)
+    })
+
+    // Handle message history fetch from Island
+    window.aiBackend.onIslandFetchMessages(({ sessionId }) => {
+      const session = sessionsRef.current.find(s => s.id === sessionId)
+      if (session) {
+        const simplifiedMessages = session.messages.map(m => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          timestamp: m.timestamp
+        }))
+        window.aiBackend.sendIslandMessagesHistory(sessionId, simplifiedMessages)
+      }
+    })
+  }, [])
+
   // Persist view mode changes
   useEffect(() => {
     if (!isElectronApp || !currentProject) return;
