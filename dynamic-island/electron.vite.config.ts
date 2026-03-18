@@ -1,32 +1,43 @@
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import { resolve } from 'path'
+import path from 'path'
 
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
+        input: {
+          index: path.resolve(__dirname, 'electron/main.ts')
+        },
         external: ['ws']
       }
     }
   },
   preload: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        input: {
+          index: path.resolve(__dirname, 'electron/preload.ts')
+        }
+      }
+    }
   },
   renderer: {
+    root: '.',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
-        '@': resolve('src')
+        '@': path.resolve(__dirname, 'src')
       }
     },
     build: {
       rollupOptions: {
         input: {
-          notch: resolve(__dirname, 'resources/notch.html'),
-          chat: resolve(__dirname, 'resources/chat.html')
+          notch: path.resolve(__dirname, 'resources/notch.html'),
+          chat: path.resolve(__dirname, 'resources/chat.html')
         }
       }
     }
