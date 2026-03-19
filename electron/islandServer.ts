@@ -63,6 +63,10 @@ export function startIslandServer(mainWindow: BrowserWindow): void {
     broadcast({ type: 'messages:history', ...data })
   })
 
+  ipcMain.on('island:session-deleted', (_e, data) => {
+    broadcast({ type: 'session:delete', sessionId: data.sessionId })
+  })
+
   console.log(`[IslandServer] WebSocket server listening on ws://localhost:${port}`)
 }
 
