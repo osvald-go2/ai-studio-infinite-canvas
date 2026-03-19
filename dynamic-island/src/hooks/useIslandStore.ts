@@ -53,7 +53,7 @@ export function useIslandStore() {
             ...s,
             sessions: s.sessions.map(ses =>
               ses.id === data.sessionId
-                ? { ...ses, status: data.status, title: data.title }
+                ? { ...ses, status: data.status, ...(data.title !== undefined && { title: data.title }), ...(data.lastMessage !== undefined && { lastMessage: data.lastMessage }) }
                 : ses
             )
           }))

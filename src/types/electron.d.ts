@@ -16,6 +16,10 @@ interface AiBackend {
   onIslandRequestSessions(callback: () => void): void;
   sendIslandSessionsResponse(sessions: any[]): void;
   sendIslandMessagesHistory(sessionId: string, messages: any[]): void;
+  emitSessionUpdate(data: { sessionId: string; status: string; title?: string; model?: string; lastMessage?: string }): void;
+  emitMessageStream(data: { sessionId: string; messageId: string; chunk: string; done: boolean }): void;
+  emitNotification(data: { sessionId: string; level: 'success' | 'error' | 'info'; text: string }): void;
+  emitSessionDeleted(sessionId: string): void;
 }
 
 interface Window {

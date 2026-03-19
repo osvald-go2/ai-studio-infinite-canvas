@@ -110,4 +110,16 @@ contextBridge.exposeInMainWorld('aiBackend', {
   sendIslandMessagesHistory: (sessionId: string, messages: any[]) => {
     ipcRenderer.send('island:messages-history', { sessionId, messages })
   },
+  emitSessionUpdate: (data: { sessionId: string; status: string; title?: string; model?: string; lastMessage?: string }) => {
+    ipcRenderer.send('island:session-updated', data)
+  },
+  emitMessageStream: (data: { sessionId: string; messageId: string; chunk: string; done: boolean }) => {
+    ipcRenderer.send('island:message-stream', data)
+  },
+  emitNotification: (data: { sessionId: string; level: 'success' | 'error' | 'info'; text: string }) => {
+    ipcRenderer.send('island:notification', data)
+  },
+  emitSessionDeleted: (sessionId: string) => {
+    ipcRenderer.send('island:session-deleted', { sessionId })
+  },
 });
