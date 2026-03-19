@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { X, Clock, Plus, MessageSquare, Send, Copy, ThumbsUp, ThumbsDown, ArrowUp, Square, Minus, Check, Pencil, RotateCcw, GitBranch, GitFork, Trash2 } from 'lucide-react';
 import { Session, Message, ContentBlock, SkillInfo } from '../types';
 import { MessageRenderer } from './message/MessageRenderer';
@@ -55,6 +55,12 @@ export function SessionWindow({
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+
+  const emitIsland = useCallback((method: 'emitSessionUpdate' | 'emitMessageStream' | 'emitNotification', data: any) => {
+    if (isElectron() && window.aiBackend[method]) {
+      window.aiBackend[method](data)
+    }
+  }, [])
 
   const { info, changes } = useGit();
   const [worktreeAdditions, setWorktreeAdditions] = useState(0);
@@ -150,6 +156,12 @@ export function SessionWindow({
 
       if (block.type === 'text' && data.delta.content) {
         (block as any).content += data.delta.content;
+        emitIsland('emitMessageStream', {
+          sessionId: session.id,
+          messageId: streamingMessageIdRef.current || '',
+          chunk: data.delta.content,
+          done: false
+        })
       } else if (block.type === 'code' && data.delta.content) {
         (block as any).code += data.delta.content;
       } else if (block.type === 'tool_call' && data.delta.args) {
@@ -180,6 +192,16 @@ export function SessionWindow({
 
     const handleMessageComplete = async (data: { session_id: string }) => {
       if (data.session_id !== backendSessionIdRef.current) return;
+
+      // Extract text content from blocks BEFORE clearing
+      const completedMsgId = streamingMessageIdRef.current
+      const textContent = Array.from(blockMap.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([_, block]) => block)
+        .filter(b => b.type === 'text')
+        .map(b => (b as any).content)
+        .join('')
+
       setIsStreaming(false);
       setStreamingMessageId(null);
       streamingMessageIdRef.current = null;
@@ -208,6 +230,24 @@ export function SessionWindow({
       };
       sessionRef.current = updated;
       onUpdate(updated);
+
+      // Notify Island
+      emitIsland('emitSessionUpdate', {
+        sessionId: session.id,
+        status: 'review',
+        lastMessage: textContent.slice(0, 50)
+      })
+      emitIsland('emitMessageStream', {
+        sessionId: session.id,
+        messageId: completedMsgId || '',
+        chunk: '',
+        done: true
+      })
+      emitIsland('emitNotification', {
+        sessionId: session.id,
+        level: 'success',
+        text: `${sessionRef.current.title} — 回复完成`
+      })
     };
 
     const handleMessageError = (data: { session_id: string; error: { code: number; message: string } }) => {
@@ -218,6 +258,11 @@ export function SessionWindow({
       isStreamingRef.current = false;
       blockMap.clear();
       console.error('[backend error]', data.error);
+      emitIsland('emitNotification', {
+        sessionId: session.id,
+        level: 'error',
+        text: `${sessionRef.current.title} — 请求失败`
+      })
     };
 
     const updateAssistantBlocks = (blocks: Map<number, ContentBlock>) => {
@@ -297,6 +342,10 @@ export function SessionWindow({
 
         sessionRef.current = updatedSession;
         onUpdate(updatedSession);
+        emitIsland('emitSessionUpdate', {
+          sessionId: session.id,
+          status: 'inprocess'
+        })
 
         setIsStreaming(true);
         setStreamingMessageId(aiMsgId);
@@ -372,6 +421,10 @@ export function SessionWindow({
 
           sessionRef.current = updatedSession;
           onUpdate(updatedSession);
+          emitIsland('emitSessionUpdate', {
+            sessionId: session.id,
+            status: 'inprocess'
+          })
 
           setIsStreaming(true);
           setStreamingMessageId(aiMsgId);
@@ -470,6 +523,10 @@ export function SessionWindow({
 
     sessionRef.current = updatedSession;
     onUpdate(updatedSession);
+    emitIsland('emitSessionUpdate', {
+      sessionId: session.id,
+      status: 'inprocess'
+    })
 
     setIsStreaming(true);
     setStreamingMessageId(aiMsgId);
@@ -738,6 +795,18 @@ export function SessionWindow({
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, []);
+
+  // Listen for messages sent from Island ChatPanel
+  useEffect(() => {
+    const handleIslandMessage = (e: Event) => {
+      const { sessionId, content } = (e as CustomEvent).detail
+      if (sessionId === session.id && content && !isStreamingRef.current) {
+        sendMessage(content)
+      }
+    }
+    window.addEventListener('island:send-message', handleIslandMessage)
+    return () => window.removeEventListener('island:send-message', handleIslandMessage)
+  }, [session.id])
 
   const isTab = variant === 'tab';
 
