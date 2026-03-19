@@ -41,16 +41,18 @@ AI Studio (主 App)                          Dynamic Island
 | 触发位置 | IPC 事件 | 数据 |
 |---------|----------|------|
 | `App.tsx` — 创建 session | `session-updated` | `{sessionId, status, title, model}` |
-| `App.tsx` — 删除 session | `session-updated` | 新增 `session:delete` WS 消息类型 |
+| `App.tsx` — 删除 session | `session-deleted` | `{sessionId}` |
 | `SessionWindow.tsx` — AI 开始回复 | `session-updated` | `{sessionId, status:'inprocess'}` |
 | `SessionWindow.tsx` — streaming 中 | `message-stream` | `{sessionId, messageId, chunk, done:false}` |
-| `SessionWindow.tsx` — AI 回复完成 | `session-updated` + `message-stream(done:true)` | `{sessionId, status:'review'}` |
+| `SessionWindow.tsx` — AI 回复完成 | `session-updated` + `message-stream(done:true)` | `{sessionId, status:'review', lastMessage: text.slice(0,50)}` |
 | `SessionWindow.tsx` — AI 回复出错 | `notification` | `{sessionId, level:'error', text}` |
+
+**streaming chunk 提取逻辑：** 在 `SessionWindow.tsx` 的 `handleBlockDelta` 中，当 block 类型为 `text` 时，提取 delta 文本内容调用 `emitMessageStream`。代码块（code blocks）和工具调用（tool_call）不发送到 Island，只传纯文本 delta。AI 回复完成时在 `handleMessageComplete` 中将所有 text blocks 拼接，取前 50 字符作为 `lastMessage` 一并通过 `session-updated` 发送。
 
 #### preload.ts 新增方法
 
 ```typescript
-emitSessionUpdate(data: { sessionId: string; status: string; title?: string; model?: string }): void
+emitSessionUpdate(data: { sessionId: string; status: string; title?: string; model?: string; lastMessage?: string }): void
 emitMessageStream(data: { sessionId: string; messageId: string; chunk: string; done: boolean }): void
 emitNotification(data: { sessionId: string; level: 'success' | 'error' | 'info'; text: string }): void
 ```
@@ -59,7 +61,16 @@ emitNotification(data: { sessionId: string; level: 'success' | 'error' | 'info';
 
 #### islandServer.ts
 
-**不需要改动。** 已有完整的 IPC 监听 → WS 广播逻辑，覆盖所有上述事件。
+**需要新增一个 IPC 处理器：** `island:session-deleted`，将其广播为 `{ type: 'session:delete', sessionId }` WS 消息。其余已有的 IPC 监听 → WS 广播逻辑覆盖所有其他事件。
+
+#### SessionWindow.tsx — 接收 Island 发送的消息
+
+**现状缺口：** `App.tsx` 收到 `island:send-message` IPC 后 dispatch 了 `CustomEvent('island:send-message')`，但目前没有组件监听该事件。
+
+**修复：** 在 `SessionWindow.tsx` 中添加 `useEffect` 监听 `island:send-message` CustomEvent。收到后：
+1. 从 event.detail 中取出 `{ sessionId, content }`
+2. 检查 sessionId 是否匹配当前 session
+3. 如匹配，将用户消息注入 session.messages 并触发 AI 回复（复用现有的发送逻辑）
 
 ### 2. Island 侧数据处理
 
@@ -78,9 +89,13 @@ case 'session:delete':
 ```
 
 **streaming 文本处理：**
-- 主 app emit streaming 时将 text blocks 拼接为纯文本字符串
+- 主 app 在 `handleBlockDelta` 中提取 text block 的 delta 文本，emit `message:stream` chunk
 - Island 保持现有的文本累积逻辑（`streamingText[sessionId] += chunk`）
-- `done:true` 时用最终文本创建 Message 对象，前 50 字符更新 `session.lastMessage`
+- `done:true` 时用最终文本创建 Message 对象，移入 `messages[sessionId]`，清空 `streamingText[sessionId]`
+
+**lastMessage 更新：**
+- 由主 app 在 AI 回复完成时（`handleMessageComplete`）将拼接文本的前 50 字符通过 `session:update` 的 `lastMessage` 字段发送
+- Island 收到 `session:update` 时如包含 `lastMessage`，更新对应 session
 
 **发消息乐观更新：**
 - 用户在 ChatPanel 发消息后，立即在本地 messages 中添加用户消息
@@ -91,7 +106,7 @@ case 'session:delete':
 **现状：** ChatPanel 已有 InputBar 组件和 `sendMessage` 功能（通过 `message:send` WS 消息发到主 app）。
 
 **需要补全的：**
-- 发送链路已通 — `message:send` → WS → 主 app → SessionWindow 处理 AI 调用
+- 发送链路部分断裂 — `message:send` → WS → 主 app `App.tsx` dispatch `CustomEvent` → **但 SessionWindow 未监听该事件**。需在 SessionWindow 添加监听器接收并处理（见第 1 节）
 - 回传链路需补全 — 主 app 在 AI 回复时 emit `message:stream` 和 `session:update` 回 Island
 - ChatPanel 接收 streaming 实时显示打字效果
 
@@ -128,14 +143,16 @@ NotchView 的 TaskCard 通过 `session:update` 消息实时更新：
 
 | 文件 | 改动类型 | 说明 |
 |------|---------|------|
-| `src/components/SessionWindow.tsx` | 修改 | 在 AI 开始/streaming/完成/出错时 emit IPC 事件 |
+| `src/components/SessionWindow.tsx` | 修改 | 在 AI 开始/streaming/完成/出错时 emit IPC 事件；添加 `island:send-message` 监听器 |
 | `src/App.tsx` | 修改 | 创建/删除 session 时 emit IPC 事件 |
 | `electron/preload.ts` | 修改 | 添加 `emitSessionUpdate`、`emitMessageStream`、`emitNotification` 便捷方法 |
+| `src/types/electron.d.ts` | 修改 | 为新增的 preload 方法添加 TypeScript 类型声明 |
+| `electron/islandServer.ts` | 修改 | 新增 `island:session-deleted` IPC 处理器 |
 | `dynamic-island/src/hooks/useIslandStore.ts` | 修改 | 去掉 mock 数据；新增 session:delete 处理；发消息乐观更新 |
 | `dynamic-island/src/components/ChatPanel/ChatPanel.tsx` | 修改 | 确保 streaming 实时显示和发送功能完整 |
 | `dynamic-island/src/types.ts` | 修改 | 新增 `session:delete` 消息类型 |
 
-**总计 6 个文件修改，0 个新文件。**
+**总计 8 个文件修改，0 个新文件。**
 
 ## 不在范围内
 
