@@ -40,7 +40,7 @@ AI Studio (主 App)                          Dynamic Island
 
 | 触发位置 | IPC 事件 | 数据 |
 |---------|----------|------|
-| `App.tsx` — 创建 session | `session-updated` | `{sessionId, status, title, model}` |
+| `App.tsx` — 创建 session | `sessions-response` | 重发完整 session 列表（复用现有 `sendIslandSessionsResponse`） |
 | `App.tsx` — 删除 session | `session-deleted` | `{sessionId}` |
 | `SessionWindow.tsx` — AI 开始回复 | `session-updated` | `{sessionId, status:'inprocess'}` |
 | `SessionWindow.tsx` — streaming 中 | `message-stream` | `{sessionId, messageId, chunk, done:false}` |
@@ -48,6 +48,8 @@ AI Studio (主 App)                          Dynamic Island
 | `SessionWindow.tsx` — AI 回复出错 | `notification` | `{sessionId, level:'error', text}` |
 
 **streaming chunk 提取逻辑：** 在 `SessionWindow.tsx` 的 `handleBlockDelta` 中，当 block 类型为 `text` 时，提取 delta 文本内容调用 `emitMessageStream`。代码块（code blocks）和工具调用（tool_call）不发送到 Island，只传纯文本 delta。AI 回复完成时在 `handleMessageComplete` 中将所有 text blocks 拼接，取前 50 字符作为 `lastMessage` 一并通过 `session-updated` 发送。
+
+**注意：** `notifyIsland(event, data)` 内部调用 `ipcRenderer.send('island:${event}', data)`，所以传入的 event 参数不带 `island:` 前缀（如 `session-updated` 而非 `island:session-updated`）。
 
 #### preload.ts 新增方法
 
@@ -96,6 +98,11 @@ case 'session:delete':
 **lastMessage 更新：**
 - 由主 app 在 AI 回复完成时（`handleMessageComplete`）将拼接文本的前 50 字符通过 `session:update` 的 `lastMessage` 字段发送
 - Island 收到 `session:update` 时如包含 `lastMessage`，更新对应 session
+
+**`session:update` handler 修复：**
+- 现有 handler 使用 `.map()` 无条件覆盖 `title`/`status`，当主 app 只发 status 变更（无 title）时会导致 title 变 undefined
+- 修复为选择性合并：`title: data.title ?? ses.title`，`lastMessage: data.lastMessage ?? ses.lastMessage`
+- 新 session 创建不走 `session:update`，走 `sessions:sync` 全量同步（见第 1 节）
 
 **发消息乐观更新：**
 - 用户在 ChatPanel 发消息后，立即在本地 messages 中添加用户消息
@@ -150,7 +157,7 @@ NotchView 的 TaskCard 通过 `session:update` 消息实时更新：
 | `electron/islandServer.ts` | 修改 | 新增 `island:session-deleted` IPC 处理器 |
 | `dynamic-island/src/hooks/useIslandStore.ts` | 修改 | 去掉 mock 数据；新增 session:delete 处理；发消息乐观更新 |
 | `dynamic-island/src/components/ChatPanel/ChatPanel.tsx` | 修改 | 确保 streaming 实时显示和发送功能完整 |
-| `dynamic-island/src/types.ts` | 修改 | 新增 `session:delete` 消息类型 |
+| `dynamic-island/src/types.ts` | 修改 | 新增 `session:delete` 消息类型；`session:update` 中 `title` 改为可选，新增可选 `lastMessage` 字段 |
 
 **总计 8 个文件修改，0 个新文件。**
 
