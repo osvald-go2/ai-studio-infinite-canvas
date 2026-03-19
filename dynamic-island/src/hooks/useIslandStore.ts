@@ -19,16 +19,9 @@ interface IslandState {
   activeChatSessionId: string | null
 }
 
-// Mock sessions for development
-const MOCK_SESSIONS: IslandSession[] = [
-  { id: '1', title: '下载推文中的研报原文', model: 'GPT-5.4', status: 'done', lastMessage: 'Task has been completed', messageCount: 3 },
-  { id: '2', title: '下载 X 帖子里的研报', model: 'Claude', status: 'inprocess', lastMessage: '定位原始研报链接', messageCount: 5 },
-  { id: '3', title: '数据分析报告', model: 'Gemini', status: 'inbox', lastMessage: '等待中', messageCount: 0 }
-]
-
 export function useIslandStore() {
   const [state, setState] = useState<IslandState>({
-    sessions: MOCK_SESSIONS,
+    sessions: [],
     notifications: [],
     messages: {},
     streamingText: {},
@@ -53,10 +46,31 @@ export function useIslandStore() {
             ...s,
             sessions: s.sessions.map(ses =>
               ses.id === data.sessionId
-                ? { ...ses, status: data.status, ...(data.title !== undefined && { title: data.title }), ...(data.lastMessage !== undefined && { lastMessage: data.lastMessage }) }
+                ? {
+                    ...ses,
+                    status: data.status,
+                    title: data.title ?? ses.title,
+                    lastMessage: data.lastMessage ?? ses.lastMessage
+                  }
                 : ses
             )
           }))
+          break
+
+        case 'session:delete':
+          setState(s => {
+            const { [data.sessionId]: _msgs, ...restMessages } = s.messages
+            const { [data.sessionId]: _str, ...restStreaming } = s.streamingText
+            const { [data.sessionId]: _steps, ...restSteps } = s.taskSteps
+            return {
+              ...s,
+              sessions: s.sessions.filter(ses => ses.id !== data.sessionId),
+              messages: restMessages,
+              streamingText: restStreaming,
+              taskSteps: restSteps,
+              notifications: s.notifications.filter(n => n.sessionId !== data.sessionId)
+            }
+          })
           break
 
         case 'message:new':
@@ -168,6 +182,21 @@ export function useIslandStore() {
   }, [])
 
   const sendMessage = useCallback((sessionId: string, content: string) => {
+    // Optimistic update: add user message locally immediately
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content,
+      timestamp: Date.now()
+    }
+    setState(s => ({
+      ...s,
+      messages: {
+        ...s.messages,
+        [sessionId]: [...(s.messages[sessionId] || []), userMsg]
+      }
+    }))
+    // Send to AI Studio via WebSocket
     window.island.wsSend({ type: 'message:send', sessionId, content })
   }, [])
 
