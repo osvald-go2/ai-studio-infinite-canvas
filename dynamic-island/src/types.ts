@@ -30,7 +30,8 @@ export interface Message {
 // AI Studio → Island
 export type ServerMessage =
   | { type: 'sessions:sync'; sessions: IslandSession[] }
-  | { type: 'session:update'; sessionId: string; status: SessionStatus; title: string }
+  | { type: 'session:update'; sessionId: string; status: SessionStatus; title?: string; lastMessage?: string }
+  | { type: 'session:delete'; sessionId: string }
   | { type: 'message:new'; sessionId: string; message: Message }
   | { type: 'message:stream'; sessionId: string; messageId: string; chunk: string; done: boolean }
   | { type: 'task:progress'; sessionId: string; steps: TaskStep[] }
