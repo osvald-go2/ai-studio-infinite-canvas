@@ -409,6 +409,7 @@ export default function App() {
     previousIds.forEach(id => {
       if (!currentIds.has(id)) {
         backend.persistDeleteSession(id).catch(console.error);
+        window.aiBackend?.emitSessionDeleted?.(id);
       }
     });
 
@@ -436,6 +437,24 @@ export default function App() {
     };
 
     setSessions(prev => [...prev, newSession]);
+
+    // Notify Island of new session list
+    if (isElectronApp && window.aiBackend) {
+      // Use setTimeout to ensure sessionsRef.current includes newSession after React re-render
+      setTimeout(() => {
+        const islandSessions = sessionsRef.current.map(s => ({
+          id: s.id,
+          title: s.title,
+          model: s.model,
+          status: s.status,
+          lastMessage: s.messages.length > 0
+            ? s.messages[s.messages.length - 1].content.slice(0, 100)
+            : undefined,
+          messageCount: s.messages.length
+        }))
+        window.aiBackend.sendIslandSessionsResponse(islandSessions)
+      }, 0)
+    }
 
     // Immediately persist to DB so the session survives page reloads
     if (isElectronApp && currentProject) {
