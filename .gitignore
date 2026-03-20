@@ -43,6 +43,9 @@ release/
 demo-video/
 resources/
 
+# Reference files
+land_demo/
+
 # Misc
 skills/
 skills-lock.json
