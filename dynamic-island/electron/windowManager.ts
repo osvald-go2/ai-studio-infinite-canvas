@@ -1,13 +1,10 @@
 import { BrowserWindow, screen, ipcMain } from 'electron'
-import { join } from 'path'
 import { getInternalDisplay, getNotchHeight } from './notchDetector'
 
 type NotchState = 'capsule' | 'cards'
 
 const NOTCH_WIDTH = 600
 const NOTCH_HEIGHT = 140
-const CHAT_WIDTH = 420
-const CHAT_HEIGHT = 600
 const HOVER_POLL_INTERVAL = 100
 const HOVER_TRIGGER_WIDTH = 400
 const HOVER_TRIGGER_HEIGHT = 80
@@ -15,12 +12,9 @@ const COLLAPSE_DELAY = 500
 
 export class WindowManager {
   private notchWindow: BrowserWindow | null = null
-  private chatWindow: BrowserWindow | null = null
   private notchState: NotchState = 'capsule'
   private hoverPollTimer: ReturnType<typeof setInterval> | null = null
   private collapseTimer: ReturnType<typeof setTimeout> | null = null
-  private chatOpen = false
-  private activeChatSessionId: string | null = null
 
   constructor(private preloadPath: string) {}
 
@@ -59,27 +53,6 @@ export class WindowManager {
     this.notchWindow.setIgnoreMouseEvents(true)
     this.notchWindow.showInactive()
 
-    // Chat Window (hidden initially)
-    this.chatWindow = new BrowserWindow({
-      width: CHAT_WIDTH,
-      height: CHAT_HEIGHT,
-      x: display.bounds.x + Math.round((display.bounds.width - CHAT_WIDTH) / 2),
-      y: display.bounds.y + Math.round((display.bounds.height - CHAT_HEIGHT) / 2),
-      frame: false,
-      transparent: true,
-      alwaysOnTop: false,
-      resizable: false,
-      hasShadow: true,
-      show: false,
-      fullscreenable: false,
-      backgroundColor: '#00000000',
-      webPreferences: {
-        preload: this.preloadPath,
-        contextIsolation: true,
-        nodeIntegration: false
-      }
-    })
-
     this.setupIPC()
     this.startHoverPolling()
   }
@@ -93,26 +66,13 @@ export class WindowManager {
     })
 
     ipcMain.on('notch:mouse-leave', () => {
-      if (this.notchState === 'cards' && !this.chatOpen) {
+      if (this.notchState === 'cards') {
         this.collapseTimer = setTimeout(() => {
           this.transitionTo('capsule')
         }, COLLAPSE_DELAY)
       }
     })
 
-    ipcMain.on('chat:open', (_e, sessionId: string) => {
-      this.activeChatSessionId = sessionId
-      this.chatOpen = true
-      this.chatWindow?.webContents.send('chat:active-session', sessionId)
-      this.chatWindow?.show()
-      this.chatWindow?.focus()
-    })
-
-    ipcMain.on('chat:close', () => {
-      this.chatOpen = false
-      this.activeChatSessionId = null
-      this.chatWindow?.hide()
-    })
   }
 
   private startHoverPolling(): void {
@@ -167,11 +127,14 @@ export class WindowManager {
       this.stopHoverPolling()
       if (this.notchWindow && !this.notchWindow.isDestroyed()) {
         this.notchWindow.setIgnoreMouseEvents(false)
+        this.notchWindow.setFocusable(true)
+        this.notchWindow.focus()
       }
       this.safeSend(this.notchWindow, 'notch:state-change', 'cards')
     } else if (state === 'capsule') {
       if (this.notchWindow && !this.notchWindow.isDestroyed()) {
         this.notchWindow.setIgnoreMouseEvents(true)
+        this.notchWindow.setFocusable(false)
       }
       this.safeSend(this.notchWindow, 'notch:state-change', 'capsule')
       this.startHoverPolling()
@@ -184,22 +147,11 @@ export class WindowManager {
       this.transitionTo('cards')
       // Auto-collapse after 4 seconds if not interacted with
       setTimeout(() => {
-        if (this.notchState === 'cards' && !this.chatOpen) {
+        if (this.notchState === 'cards') {
           this.transitionTo('capsule')
         }
       }, 4000)
     }
-  }
-
-  /** Re-show chat window (e.g., when clicking "Open in chat" again) */
-  showChat(sessionId: string): void {
-    this.activeChatSessionId = sessionId
-    this.chatOpen = true
-    this.chatWindow?.webContents.send('chat:active-session', sessionId)
-    if (!this.chatWindow?.isVisible()) {
-      this.chatWindow?.show()
-    }
-    this.chatWindow?.focus()
   }
 
   private safeSend(win: BrowserWindow | null, channel: string, ...args: any[]): void {
@@ -208,32 +160,25 @@ export class WindowManager {
     }
   }
 
-  /** Forward WebSocket messages to both renderers */
   broadcastToRenderers(data: any): void {
     this.safeSend(this.notchWindow, 'ws:message', data)
-    this.safeSend(this.chatWindow, 'ws:message', data)
   }
 
-  /** Update connection status in both renderers */
   setConnectionStatus(connected: boolean): void {
     this.safeSend(this.notchWindow, 'ws:connection-status', connected)
-    this.safeSend(this.chatWindow, 'ws:connection-status', connected)
   }
 
-  loadPages(notchURL: string, chatURL: string): void {
+  loadPages(notchURL: string): void {
     this.notchWindow?.loadURL(notchURL)
-    this.chatWindow?.loadURL(chatURL)
   }
 
-  loadFiles(notchPath: string, chatPath: string): void {
+  loadFiles(notchPath: string): void {
     this.notchWindow?.loadFile(notchPath)
-    this.chatWindow?.loadFile(chatPath)
   }
 
   destroy(): void {
     this.stopHoverPolling()
     if (this.collapseTimer) clearTimeout(this.collapseTimer)
     this.notchWindow?.destroy()
-    this.chatWindow?.destroy()
   }
 }
