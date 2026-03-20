@@ -13,7 +13,7 @@ import { GitReviewPanel } from './components/git/GitReviewPanel';
 import { GitPanel } from './components/git/GitPanel';
 import { TerminalPanel } from './components/terminal/TerminalPanel';
 import { GitProvider } from './contexts/GitProvider';
-import { Session, SessionStatus, DbProject, DbSession } from './types';
+import { Session, SessionStatus, Message, DbProject, DbSession } from './types';
 import { backend } from './services/backend';
 import { gitService } from './services/git';
 import { initialSessions } from './data';
@@ -84,6 +84,34 @@ function findNextGridPosition(
   // Fallback: right of everything at y=0
   const maxX = sessions.reduce((max, s) => Math.max(max, s.position.x + w), 0);
   return { x: maxX + gap, y: 0 };
+}
+
+function extractMessageText(m: Message): string {
+  if (m.role === 'assistant' && m.blocks && m.blocks.length > 0) {
+    const text = m.blocks
+      .filter((b): b is { type: 'text'; content: string } =>
+        b.type === 'text' && !b.content.startsWith('Connected:')
+      )
+      .map(b => b.content)
+      .join('')
+    if (text) return text
+  }
+  return m.content
+}
+
+function getSessionLastMessage(s: Session): string | undefined {
+  if (s.messages.length === 0) return undefined
+  const last = s.messages[s.messages.length - 1]
+  if (last.role === 'assistant' && last.blocks && last.blocks.length > 0) {
+    return last.blocks
+      .filter((b): b is { type: 'text'; content: string } =>
+        b.type === 'text' && !b.content.startsWith('Connected:')
+      )
+      .map(b => b.content)
+      .join('')
+      .slice(0, 100) || undefined
+  }
+  return last.content.slice(0, 100) || undefined
 }
 
 export default function App() {
@@ -356,9 +384,7 @@ export default function App() {
         title: s.title,
         model: s.model,
         status: s.status,
-        lastMessage: s.messages.length > 0
-          ? s.messages[s.messages.length - 1].content.slice(0, 100)
-          : undefined,
+        lastMessage: getSessionLastMessage(s),
         messageCount: s.messages.length
       }))
       window.aiBackend.sendIslandSessionsResponse(islandSessions)
@@ -371,13 +397,59 @@ export default function App() {
         const simplifiedMessages = session.messages.map(m => ({
           id: m.id,
           role: m.role,
-          content: m.content,
+          content: extractMessageText(m),
           timestamp: m.timestamp
         }))
         window.aiBackend.sendIslandMessagesHistory(sessionId, simplifiedMessages)
       }
     })
   }, [])
+
+  // Chat Popup integration — respond to session data requests + metadata sync
+  useEffect(() => {
+    if (!window.aiBackend?.ipcOn) return
+
+    const handleSessionRequest = (_e: any, { sessionId, requestId }: { sessionId: string; requestId: string }) => {
+      const session = sessionsRef.current.find(s => s.id === sessionId)
+      if (session) {
+        window.aiBackend.ipcSend(
+          `chat-popup:session-response:${requestId}`,
+          JSON.parse(JSON.stringify(session))
+        )
+      }
+    }
+
+    const handleMetadataUpdate = (_e: any, metadata: { id: string; title: string; status: string; claudeSessionId?: string; codexThreadId?: string }) => {
+      setSessions(prev => prev.map(s =>
+        s.id === metadata.id
+          ? { ...s, title: metadata.title, status: metadata.status as any, claudeSessionId: metadata.claudeSessionId, codexThreadId: metadata.codexThreadId }
+          : s
+      ))
+    }
+
+    window.aiBackend.ipcOn('chat-popup:request-session', handleSessionRequest)
+    window.aiBackend.ipcOn('chat-popup:metadata-updated', handleMetadataUpdate)
+
+    return () => {
+      window.aiBackend.ipcOff('chat-popup:request-session', handleSessionRequest)
+      window.aiBackend.ipcOff('chat-popup:metadata-updated', handleMetadataUpdate)
+    }
+  }, [])
+
+  // Keep Island in sync — fires when session list, statuses, or titles change
+  const sessionSyncKey = sessions.map(s => `${s.id}:${s.status}:${s.title}`).join(',')
+  useEffect(() => {
+    if (!isElectronApp || !window.aiBackend?.sendIslandSessionsResponse) return
+    const islandSessions = sessions.map(s => ({
+      id: s.id,
+      title: s.title,
+      model: s.model,
+      status: s.status,
+      lastMessage: getSessionLastMessage(s),
+      messageCount: s.messages.length
+    }))
+    window.aiBackend.sendIslandSessionsResponse(islandSessions)
+  }, [sessionSyncKey])
 
   // Persist view mode changes
   useEffect(() => {
@@ -448,7 +520,7 @@ export default function App() {
           model: s.model,
           status: s.status,
           lastMessage: s.messages.length > 0
-            ? s.messages[s.messages.length - 1].content.slice(0, 100)
+            ? getSessionLastMessage(s)
             : undefined,
           messageCount: s.messages.length
         }))
