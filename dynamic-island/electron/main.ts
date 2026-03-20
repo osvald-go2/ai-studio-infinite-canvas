@@ -6,6 +6,7 @@ import { WsClient } from './wsClient'
 
 let windowManager: WindowManager | null = null
 let wsClient: WsClient | null = null
+let lastSessionsSync: any = null
 
 app.dock?.hide()
 
@@ -32,18 +33,15 @@ app.whenReady().then(() => {
   windowManager = new WindowManager(preloadPath)
   windowManager.createWindows()
 
-  // In dev mode, load from vite dev server
   if (process.env.ELECTRON_RENDERER_URL) {
     const baseURL = process.env.ELECTRON_RENDERER_URL
     const notchURL = `${baseURL}/resources/notch.html`
-    const chatURL = `${baseURL}/resources/chat.html`
-    console.log('[Island] Loading dev URLs:', notchURL, chatURL)
-    windowManager.loadPages(notchURL, chatURL)
+    console.log('[Island] Loading dev URL:', notchURL)
+    windowManager.loadPages(notchURL)
   } else {
     const notchPath = join(__dirname, '../renderer/resources/notch.html')
-    const chatPath = join(__dirname, '../renderer/resources/chat.html')
-    console.log('[Island] Loading files:', notchPath, chatPath)
-    windowManager.loadFiles(notchPath, chatPath)
+    console.log('[Island] Loading file:', notchPath)
+    windowManager.loadFiles(notchPath)
   }
 
   // Connect to AI Studio
@@ -58,6 +56,11 @@ app.whenReady().then(() => {
   })
 
   wsClient.on('message', (data: any) => {
+    // Cache sessions:sync so we can replay it when renderer mounts
+    if (data.type === 'sessions:sync') {
+      lastSessionsSync = data
+    }
+
     windowManager?.broadcastToRenderers(data)
 
     // Auto-expand on notification
@@ -69,6 +72,15 @@ app.whenReady().then(() => {
   // Forward renderer WS sends to server
   ipcMain.on('ws:send', (_e, message) => {
     wsClient?.send(message)
+  })
+
+  // Renderer mounted and ready — replay cached sessions or request from server
+  ipcMain.on('island:renderer-ready', () => {
+    if (lastSessionsSync) {
+      windowManager?.broadcastToRenderers(lastSessionsSync)
+    } else if (wsClient?.connected) {
+      wsClient.send({ type: 'sessions:fetch' })
+    }
   })
 
   wsClient.connect()
