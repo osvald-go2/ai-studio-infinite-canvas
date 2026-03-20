@@ -7,6 +7,7 @@ import Store from 'electron-store';
 import * as pty from 'node-pty';
 import { SidecarManager } from './sidecar';
 import { startIslandServer, stopIslandServer } from './islandServer';
+import { destroyChatPopup, hideChatPopup } from './chatPopupManager';
 
 const store = new Store<{ anthropicApiKey?: string; lastProjectDir?: string }>();
 
@@ -56,6 +57,7 @@ function createWindow(): void {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+    destroyChatPopup();
   });
 }
 
@@ -91,15 +93,19 @@ function startSidecar(): void {
   sidecar.spawn(getSidecarEnv());
 
   sidecar.on('event', (eventName: string, data: any) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('sidecar:event', eventName, data);
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('sidecar:event', eventName, data);
+      }
     }
   });
 
   sidecar.on('crashed', (code: number | null) => {
     console.log(`[main] sidecar crashed with code ${code}, restarting...`);
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('sidecar:event', 'sidecar.restarted', {});
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('sidecar:event', 'sidecar.restarted', {});
+      }
     }
     setTimeout(() => {
       if (sidecar) {
@@ -161,6 +167,39 @@ ipcMain.on('window:dragging', (_, screenX: number, screenY: number) => {
   const dx = screenX - dragStartMouse.x;
   const dy = screenY - dragStartMouse.y;
   mainWindow.setPosition(dragStartWin.x + dx, dragStartWin.y + dy);
+});
+
+// ── Chat Popup IPC handlers ──
+
+ipcMain.handle('chat-popup:close', () => {
+  hideChatPopup();
+});
+
+ipcMain.handle('chat-popup:get-session', async (_e, { sessionId }: { sessionId: string }) => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    throw new Error('Main window not available');
+  }
+  const requestId = `${sessionId}-${Date.now()}`;
+  mainWindow.webContents.send('chat-popup:request-session', { sessionId, requestId });
+
+  const responseChannel = `chat-popup:session-response:${requestId}`;
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      ipcMain.removeAllListeners(responseChannel);
+      reject(new Error('Session data request timed out'));
+    }, 5000);
+
+    ipcMain.once(responseChannel, (_e, data) => {
+      clearTimeout(timeout);
+      resolve(data);
+    });
+  });
+});
+
+ipcMain.on('chat-popup:sync-metadata', (_e, metadata: any) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('chat-popup:metadata-updated', metadata);
+  }
 });
 
 ipcMain.handle('get-working-dir', () => {
