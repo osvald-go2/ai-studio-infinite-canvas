@@ -36,8 +36,7 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: {
-          notch: path.resolve(__dirname, 'resources/notch.html'),
-          chat: path.resolve(__dirname, 'resources/chat.html')
+          notch: path.resolve(__dirname, 'resources/notch.html')
         }
       }
     }
