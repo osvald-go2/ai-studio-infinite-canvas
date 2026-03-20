@@ -16,7 +16,6 @@ interface IslandState {
   taskSteps: Record<string, TaskStep[]>      // sessionId → steps
   connected: boolean
   notchState: NotchState
-  activeChatSessionId: string | null
 }
 
 export function useIslandStore() {
@@ -27,8 +26,7 @@ export function useIslandStore() {
     streamingText: {},
     taskSteps: {},
     connected: false,
-    notchState: 'capsule',
-    activeChatSessionId: null
+    notchState: 'capsule'
   })
 
   const stateRef = useRef(state)
@@ -90,14 +88,14 @@ export function useIslandStore() {
           // Key streaming text by sessionId so ChatPanel can look up by active session
           const sid = data.sessionId
           setState(s => {
-            const prev = s.streamingText[sid] || ''
-            const updated = prev + data.chunk
             if (data.done) {
-              // Move streaming text to messages
+              // Use chunk as authoritative final content when provided,
+              // otherwise fall back to accumulated streaming text.
+              const finalContent = data.chunk || s.streamingText[sid] || ''
               const msg: Message = {
                 id: data.messageId,
                 role: 'assistant',
-                content: updated,
+                content: finalContent,
                 timestamp: Date.now()
               }
               const { [sid]: _, ...restStreaming } = s.streamingText
@@ -110,9 +108,10 @@ export function useIslandStore() {
                 }
               }
             }
+            const prev = s.streamingText[sid] || ''
             return {
               ...s,
-              streamingText: { ...s.streamingText, [sid]: updated }
+              streamingText: { ...s.streamingText, [sid]: prev + data.chunk }
             }
           })
           break
@@ -164,20 +163,18 @@ export function useIslandStore() {
       setState(s => ({ ...s, notchState: notchState as NotchState }))
     }
 
-    const handleActiveChatSession = (sessionId: string | null) => {
-      setState(s => ({ ...s, activeChatSessionId: sessionId }))
-    }
-
     const cleanupWs = window.island.onWsMessage(handleWsMessage)
     const cleanupConn = window.island.onConnectionStatus(handleConnectionStatus)
     const cleanupState = window.island.onStateChange(handleStateChange)
-    const cleanupChat = window.island.onActiveChatSession(handleActiveChatSession)
+
+    // Request current sessions now that handlers are registered.
+    // Goes via IPC to main process which replays cached data or fetches from server.
+    window.island.requestSync()
 
     return () => {
       cleanupWs()
       cleanupConn()
       cleanupState()
-      cleanupChat()
     }
   }, [])
 
@@ -217,11 +214,11 @@ export function useIslandStore() {
   }, [])
 
   const openChat = useCallback((sessionId: string) => {
-    window.island.openChat(sessionId)
+    window.island.wsSend({ type: 'chat:open', sessionId })
   }, [])
 
   const closeChat = useCallback(() => {
-    window.island.closeChat()
+    window.island.wsSend({ type: 'chat:close' })
   }, [])
 
   return {
