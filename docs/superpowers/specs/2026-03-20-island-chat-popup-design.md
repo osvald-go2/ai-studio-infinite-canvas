@@ -120,11 +120,15 @@ popup variant 的行为：
 
 与 `variant='tab'` 的区别：tab 有 tab bar 上下文，popup 是完全独立的窗口。
 
-### 3. 主 Electron main.ts 改动
+### 3. 新增 electron/chatPopupManager.ts
 
-**新增 `chatPopupWindow` 管理**（导出 `createChatPopupWindow` 供 islandServer 调用）：
+**独立模块**，管理 chat popup 窗口生命周期。避免 `main.ts` 和 `islandServer.ts` 循环依赖（main 导入 islandServer，如果 islandServer 反过来导入 main 会形成循环）。
 
 ```typescript
+// electron/chatPopupManager.ts
+import { BrowserWindow, ipcMain } from 'electron'
+import path from 'path'
+
 let chatPopupWindow: BrowserWindow | null = null
 
 export function createChatPopupWindow(sessionId: string): void {
@@ -167,6 +171,29 @@ export function createChatPopupWindow(sessionId: string): void {
     chatPopupWindow = null
   })
 }
+
+export function hideChatPopup(): void {
+  chatPopupWindow?.hide()
+}
+
+export function destroyChatPopup(): void {
+  if (chatPopupWindow && !chatPopupWindow.isDestroyed()) {
+    chatPopupWindow.destroy()
+    chatPopupWindow = null
+  }
+}
+
+export function getChatPopupWindow(): BrowserWindow | null {
+  return chatPopupWindow
+}
+```
+
+`main.ts` 和 `islandServer.ts` 都从此模块导入，无循环依赖。
+
+### 4. 主 Electron main.ts 改动
+
+```typescript
+import { createChatPopupWindow, hideChatPopup, destroyChatPopup } from './chatPopupManager'
 ```
 
 **Sidecar 事件广播改动**（关键）：
@@ -203,7 +230,7 @@ sidecar.on('crashed', (code) => {
 ```typescript
 // Popup 请求关闭
 ipcMain.handle('chat-popup:close', () => {
-  chatPopupWindow?.hide()
+  hideChatPopup()
 })
 
 // Popup 请求 session 数据（转发给主 renderer，带超时）
@@ -216,13 +243,14 @@ ipcMain.handle('chat-popup:get-session', async (_e, { sessionId }) => {
   const requestId = `${sessionId}-${Date.now()}`
   mainWindow.webContents.send('chat-popup:request-session', { sessionId, requestId })
 
+  const responseChannel = `chat-popup:session-response:${requestId}`
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      ipcMain.removeHandler(`chat-popup:session-response:${requestId}`)
+      ipcMain.removeAllListeners(responseChannel)
       reject(new Error('Session data request timed out'))
     }, 5000)
 
-    ipcMain.once(`chat-popup:session-response:${requestId}`, (_e, data) => {
+    ipcMain.once(responseChannel, (_e, data) => {
       clearTimeout(timeout)
       resolve(data)
     })
@@ -243,14 +271,11 @@ ipcMain.on('chat-popup:sync-metadata', (_e, metadata) => {
 mainWindow.on('closed', () => {
   mainWindow = null
   // 主窗口关闭时销毁 popup，避免孤立窗口
-  if (chatPopupWindow && !chatPopupWindow.isDestroyed()) {
-    chatPopupWindow.destroy()
-    chatPopupWindow = null
-  }
+  destroyChatPopup()
 })
 ```
 
-### 4. electron.vite.config.ts 改动
+### 5. electron.vite.config.ts 改动
 
 添加 `chat-popup.html` 为新入口：
 
@@ -268,7 +293,7 @@ renderer: {
 }
 ```
 
-### 5. electron/preload.ts 改动
+### 6. electron/preload.ts 改动
 
 在 `contextBridge.exposeInMainWorld('aiBackend', { ... })` 中新增 `chatPopup` 命名空间：
 
@@ -297,7 +322,7 @@ chatPopup: {
 
 **注意**：这些 API 使用专用 IPC channel，**不经过** `sidecar:invoke` 或 `sidecar:event`。`window.aiBackend.invoke()` 和 `on()` 仍然专门用于 sidecar 通信，popup 不复用它们。
 
-### 6. App.tsx 改动
+### 7. App.tsx 改动
 
 在 Island integration `useEffect` 中添加 popup 通信（使用**专用 IPC listener**，不复用 `window.aiBackend.on()`）：
 
@@ -334,27 +359,32 @@ useEffect(() => {
 }, [])
 ```
 
-**preload.ts 需要额外暴露通用 IPC 方法**（供 App.tsx 在主 renderer 中监听 main process 转发的消息）：
+**preload.ts 需要额外暴露限定范围的 IPC 方法**（供 App.tsx 在主 renderer 中监听 main process 转发的消息）：
 
 ```typescript
-// 在 aiBackend 中新增
+// 在 aiBackend 中新增 — 限定只允许 chat-popup: 前缀的 channel，防止滥用
 ipcOn: (channel: string, callback: (...args: any[]) => void) => {
+  if (!channel.startsWith('chat-popup:')) throw new Error(`ipcOn: channel "${channel}" not allowed`)
   ipcRenderer.on(channel, callback)
 },
 ipcOff: (channel: string, callback: (...args: any[]) => void) => {
+  if (!channel.startsWith('chat-popup:')) throw new Error(`ipcOff: channel "${channel}" not allowed`)
   ipcRenderer.removeListener(channel, callback)
 },
 ipcSend: (channel: string, ...args: any[]) => {
+  if (!channel.startsWith('chat-popup:')) throw new Error(`ipcSend: channel "${channel}" not allowed`)
   ipcRenderer.send(channel, ...args)
 },
 ```
 
-### 7. islandServer.ts 改动
+**安全说明**：这些方法通过 channel 前缀白名单限制作用域，只允许 `chat-popup:*` 通道，防止 renderer 代码访问其他 IPC 通道（如 sidecar、pty 等）。
 
-`islandServer` 运行在主 Electron 的 main process 中，可以**直接调用** `createChatPopupWindow()`，无需绕道 renderer。
+### 8. islandServer.ts 改动
+
+`islandServer` 运行在主 Electron 的 main process 中，从 `chatPopupManager` 导入（不从 `main.ts`，避免循环依赖），可以直接调用窗口管理函数。
 
 ```typescript
-import { createChatPopupWindow } from './main'
+import { createChatPopupWindow, hideChatPopup } from './chatPopupManager'
 
 // 在 handleClientMessage 的 switch 中添加
 case 'chat:open':
@@ -362,15 +392,13 @@ case 'chat:open':
   break
 
 case 'chat:close':
-  // 通过 IPC 让 main process 隐藏 popup
-  // （或直接 import chatPopupWindow 引用）
-  ipcMain.emit('chat-popup:close-from-island')
+  hideChatPopup()
   break
 ```
 
-**设计说明**：`chat:open` 不经过 renderer 中转，直接在 main process 创建窗口。这避免了 mainWindow renderer 未加载时的死锁问题。
+**设计说明**：`chat:open` 和 `chat:close` 都在 main process 中直接处理，不经过 renderer 中转。这避免了 mainWindow renderer 未加载时的死锁问题。
 
-### 8. Island 端改动
+### 9. Island 端改动
 
 **useIslandStore.ts** — `openChat()` 改为发 WebSocket：
 
@@ -399,7 +427,7 @@ openChat: (sessionId: string) => {
 - 删除 `onActiveChatSession`
 - 保留 WebSocket 和 notch 相关 API
 
-### 9. 删除的文件
+### 10. 删除的文件
 
 | 文件 | 原因 |
 |------|------|
