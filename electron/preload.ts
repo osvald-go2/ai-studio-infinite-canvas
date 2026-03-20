@@ -122,4 +122,33 @@ contextBridge.exposeInMainWorld('aiBackend', {
   emitSessionDeleted: (sessionId: string) => {
     ipcRenderer.send('island:session-deleted', { sessionId })
   },
+
+  // ── Chat Popup API ──
+  chatPopup: {
+    getSession: (sessionId: string): Promise<any> =>
+      ipcRenderer.invoke('chat-popup:get-session', { sessionId }),
+    close: (): Promise<void> =>
+      ipcRenderer.invoke('chat-popup:close'),
+    syncMetadata: (metadata: { id: string; title: string; status: string; claudeSessionId?: string; codexThreadId?: string }) =>
+      ipcRenderer.send('chat-popup:sync-metadata', metadata),
+    onSwitchSession: (cb: (sessionId: string) => void) => {
+      const handler = (_e: any, sessionId: string) => cb(sessionId)
+      ipcRenderer.on('chat-popup:switch-session', handler)
+      return () => ipcRenderer.removeListener('chat-popup:switch-session', handler)
+    },
+  },
+
+  // Scoped IPC — only allows chat-popup: prefixed channels
+  ipcOn: (channel: string, callback: (...args: any[]) => void) => {
+    if (!channel.startsWith('chat-popup:')) throw new Error(`ipcOn: channel "${channel}" not allowed`)
+    ipcRenderer.on(channel, callback)
+  },
+  ipcOff: (channel: string, callback: (...args: any[]) => void) => {
+    if (!channel.startsWith('chat-popup:')) throw new Error(`ipcOff: channel "${channel}" not allowed`)
+    ipcRenderer.removeListener(channel, callback)
+  },
+  ipcSend: (channel: string, ...args: any[]) => {
+    if (!channel.startsWith('chat-popup:')) throw new Error(`ipcSend: channel "${channel}" not allowed`)
+    ipcRenderer.send(channel, ...args)
+  },
 });

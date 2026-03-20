@@ -20,6 +20,19 @@ interface AiBackend {
   emitMessageStream(data: { sessionId: string; messageId: string; chunk: string; done: boolean }): void;
   emitNotification(data: { sessionId: string; level: 'success' | 'error' | 'info'; text: string }): void;
   emitSessionDeleted(sessionId: string): void;
+
+  // Chat Popup
+  chatPopup: {
+    getSession(sessionId: string): Promise<any>;
+    close(): Promise<void>;
+    syncMetadata(metadata: { id: string; title: string; status: string; claudeSessionId?: string; codexThreadId?: string }): void;
+    onSwitchSession(cb: (sessionId: string) => void): () => void;
+  };
+
+  // Scoped IPC (chat-popup: prefix only)
+  ipcOn(channel: string, callback: (...args: any[]) => void): void;
+  ipcOff(channel: string, callback: (...args: any[]) => void): void;
+  ipcSend(channel: string, ...args: any[]): void;
 }
 
 interface Window {
