@@ -1,3 +1,4 @@
+import { useRef, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { Bot, Settings } from 'lucide-react'
 import { Capsule } from './Capsule'
@@ -21,10 +22,70 @@ export function NotchView() {
   const isCapsule = notchState === 'capsule'
   const hasActiveTask = sessions.some(s => s.status === 'inprocess')
 
+  // Drag-to-scroll state
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const isDragging = useRef(false)
+  const hasDragged = useRef(false)
+  const dragStartX = useRef(0)
+  const scrollStartLeft = useRef(0)
+  const DRAG_THRESHOLD = 4
+
   const handleOpenChat = (sessionId: string) => {
+    if (hasDragged.current) return // ignore click after drag
     fetchMessages(sessionId)
     openChat(sessionId)
   }
+
+  // Convert vertical scroll wheel → horizontal scroll
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    const el = scrollRef.current
+    if (!el) return
+    if (e.deltaY !== 0) {
+      el.scrollLeft += e.deltaY
+    }
+  }, [])
+
+  // Drag-to-scroll handlers
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    const el = scrollRef.current
+    if (!el) return
+    isDragging.current = true
+    hasDragged.current = false
+    dragStartX.current = e.clientX
+    scrollStartLeft.current = el.scrollLeft
+  }, [])
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isDragging.current) return
+    const el = scrollRef.current
+    if (!el) return
+    const dx = e.clientX - dragStartX.current
+    if (Math.abs(dx) > DRAG_THRESHOLD) {
+      hasDragged.current = true
+      el.style.cursor = 'grabbing'
+    }
+    el.scrollLeft = scrollStartLeft.current - dx
+  }, [])
+
+  const handleMouseUp = useCallback(() => {
+    isDragging.current = false
+    const el = scrollRef.current
+    if (el) el.style.cursor = 'grab'
+    // Reset hasDragged after a tick so onClick can check it
+    setTimeout(() => { hasDragged.current = false }, 0)
+  }, [])
+
+  // Clean up drag on mouse leaving window
+  useEffect(() => {
+    const onMouseUp = () => {
+      isDragging.current = false
+      const el = scrollRef.current
+      if (el) el.style.cursor = 'grab'
+      setTimeout(() => { hasDragged.current = false }, 0)
+    }
+    window.addEventListener('mouseup', onMouseUp)
+    return () => window.removeEventListener('mouseup', onMouseUp)
+  }, [])
 
   return (
     <div
@@ -71,19 +132,28 @@ export function NotchView() {
               transition={{ duration: 0.15, delay: 0.08 }}
             >
               {/* Header row */}
-              <div className="flex items-center justify-between px-4 pt-2.5 pb-1">
-                <div className="flex items-center gap-2">
-                  <Bot size={14} color="#888" />
-                  <span className="text-[11px] text-[#aaa] font-medium">
-                    There are {sessions.length} sessions
+              <div className="flex items-center justify-between px-4 pt-1.5 pb-0.5 shrink-0">
+                <div className="flex items-center gap-1.5">
+                  <Bot size={12} color="#666" />
+                  <span className="text-[10px] text-[#888] font-medium">
+                    {sessions.length} sessions
                   </span>
                 </div>
-                <Settings size={13} color="#555" className="cursor-pointer hover:text-[#888] transition-colors" />
+                <Settings size={12} color="#444" className="cursor-pointer hover:text-[#888] transition-colors" />
               </div>
 
-              {/* Horizontal scrollable cards */}
-              <div className="flex-1 px-3 pb-2.5 overflow-hidden">
-                <div className="notch-scroll-container flex gap-2 h-full overflow-x-auto">
+              {/* Horizontal scrollable cards — wheel + drag-to-scroll */}
+              <div className="flex-1 min-h-0 px-3 pb-2">
+                <div
+                  ref={scrollRef}
+                  className="notch-scroll-container flex gap-2 h-full overflow-x-auto"
+                  style={{ cursor: 'grab' }}
+                  onWheel={handleWheel}
+                  onMouseDown={handleMouseDown}
+                  onMouseMove={handleMouseMove}
+                  onMouseUp={handleMouseUp}
+                  onMouseLeave={handleMouseUp}
+                >
                   {sessions.map((session, index) => (
                     <TaskCard
                       key={session.id}
