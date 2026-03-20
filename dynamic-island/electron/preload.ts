@@ -12,10 +12,6 @@ const api = {
   notifyMouseEnter: () => ipcRenderer.send('notch:mouse-enter'),
   notifyMouseLeave: () => ipcRenderer.send('notch:mouse-leave'),
 
-  // Chat window control
-  openChat: (sessionId: string) => ipcRenderer.send('chat:open', sessionId),
-  closeChat: () => ipcRenderer.send('chat:close'),
-
   // WebSocket data forwarding (main → renderer, returns cleanup)
   onWsMessage: (callback: (data: any) => void) => {
     const handler = (_e: any, data: any) => callback(data)
@@ -33,12 +29,8 @@ const api = {
     return () => ipcRenderer.removeListener('ws:connection-status', handler)
   },
 
-  // Get current active chat session (returns cleanup)
-  onActiveChatSession: (callback: (sessionId: string | null) => void) => {
-    const handler = (_e: any, sessionId: string | null) => callback(sessionId)
-    ipcRenderer.on('chat:active-session', handler)
-    return () => ipcRenderer.removeListener('chat:active-session', handler)
-  }
+  // Signal that renderer has mounted and is ready to receive data
+  requestSync: () => ipcRenderer.send('island:renderer-ready')
 }
 
 contextBridge.exposeInMainWorld('island', api)

@@ -45,6 +45,8 @@ export type ClientMessage =
   | { type: 'session:cancel'; sessionId: string }
   | { type: 'notification:dismiss'; sessionId: string }
   | { type: 'messages:fetch'; sessionId: string }
+  | { type: 'chat:open'; sessionId: string }
+  | { type: 'chat:close' }
 
 // ─── Notch State Machine ───
 export type NotchState = 'capsule' | 'cards' | 'chat'
@@ -63,12 +65,10 @@ export interface IslandAPI {
   onStateChange: (callback: (state: string) => void) => () => void
   notifyMouseEnter: () => void
   notifyMouseLeave: () => void
-  openChat: (sessionId: string) => void
-  closeChat: () => void
   onWsMessage: (callback: (data: any) => void) => () => void
   wsSend: (message: any) => void
   onConnectionStatus: (callback: (connected: boolean) => void) => () => void
-  onActiveChatSession: (callback: (sessionId: string | null) => void) => () => void
+  requestSync: () => void
 }
 
 declare global {
