@@ -33,6 +33,7 @@ export default defineConfig(({ mode }) => {
         rollupOptions: {
           input: {
             index: path.resolve(__dirname, 'index.html'),
+            'chat-popup': path.resolve(__dirname, 'chat-popup.html'),
           },
         },
       },
