@@ -1,5 +1,6 @@
 import { WebSocketServer, WebSocket } from 'ws'
 import { BrowserWindow, ipcMain } from 'electron'
+import { createChatPopupWindow, hideChatPopup } from './chatPopupManager'
 
 const DEFAULT_PORT = 9720
 
@@ -93,6 +94,18 @@ function handleClientMessage(mainWindow: BrowserWindow, msg: any): void {
       mainWindow.webContents.send('island:fetch-messages', {
         sessionId: msg.sessionId
       })
+      break
+
+    case 'sessions:fetch':
+      mainWindow.webContents.send('island:request-sessions')
+      break
+
+    case 'chat:open':
+      createChatPopupWindow(msg.sessionId)
+      break
+
+    case 'chat:close':
+      hideChatPopup()
       break
   }
 }
