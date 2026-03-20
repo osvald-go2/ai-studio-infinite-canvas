@@ -37,7 +37,7 @@ export function SessionWindow({
   height?: number,
   animateHeight?: boolean,
   onHeaderDoubleClick?: (e: React.MouseEvent) => void,
-  variant?: 'default' | 'tab',
+  variant?: 'default' | 'tab' | 'popup',
   projectDir?: string | null,
   onToggleGitPanel?: () => void,
   onCopySession?: (title: string) => void
@@ -198,7 +198,7 @@ export function SessionWindow({
       const textContent = Array.from(blockMap.entries())
         .sort(([a], [b]) => a - b)
         .map(([_, block]) => block)
-        .filter(b => b.type === 'text')
+        .filter(b => b.type === 'text' && !(b as any).content.startsWith('Connected:'))
         .map(b => (b as any).content)
         .join('')
 
@@ -227,11 +227,15 @@ export function SessionWindow({
         status: 'review' as const,
         hasChanges,
         changeCount,
+        messages: sessionRef.current.messages.map(m =>
+          m.id === completedMsgId ? { ...m, content: textContent || m.content } : m
+        ),
       };
       sessionRef.current = updated;
       onUpdate(updated);
 
-      // Notify Island
+      // Notify Island — send full text as the final chunk so Island has
+      // authoritative content even if some streaming deltas were missed.
       emitIsland('emitSessionUpdate', {
         sessionId: session.id,
         status: 'review',
@@ -240,7 +244,7 @@ export function SessionWindow({
       emitIsland('emitMessageStream', {
         sessionId: session.id,
         messageId: completedMsgId || '',
-        chunk: '',
+        chunk: textContent,
         done: true
       })
       emitIsland('emitNotification', {
@@ -252,12 +256,24 @@ export function SessionWindow({
 
     const handleMessageError = (data: { session_id: string; error: { code: number; message: string } }) => {
       if (data.session_id !== backendSessionIdRef.current) return;
+      const errorMsgId = streamingMessageIdRef.current;
       setIsStreaming(false);
       setStreamingMessageId(null);
       streamingMessageIdRef.current = null;
       isStreamingRef.current = false;
       blockMap.clear();
       console.error('[backend error]', data.error);
+      // Notify Island so it exits streaming state and shows error
+      emitIsland('emitSessionUpdate', {
+        sessionId: session.id,
+        status: 'review',
+      })
+      emitIsland('emitMessageStream', {
+        sessionId: session.id,
+        messageId: errorMsgId || '',
+        chunk: `Error: ${data.error.message}`,
+        done: true
+      })
       emitIsland('emitNotification', {
         sessionId: session.id,
         level: 'error',
@@ -577,6 +593,14 @@ export function SessionWindow({
           };
           sessionRef.current = updated;
           onUpdate(updated);
+          // Notify Island so it exits streaming state
+          emitIsland('emitSessionUpdate', { sessionId: session.id, status: 'review' })
+          emitIsland('emitMessageStream', {
+            sessionId: session.id,
+            messageId: aiMsgId,
+            chunk: `Connection failed: ${errorMsg}`,
+            done: true
+          })
         }
       }
     } else {
@@ -809,21 +833,40 @@ export function SessionWindow({
   }, [session.id])
 
   const isTab = variant === 'tab';
+  const isPopup = variant === 'popup';
 
   return (
     <div className={`flex flex-col overflow-hidden text-sm text-gray-200 ${
-      isTab
+      isTab || isPopup
         ? 'w-full h-full bg-[#1E1814]/80 backdrop-blur-3xl'
         : fullScreen
           ? 'w-full h-full bg-transparent'
           : 'w-[600px] bg-[#1E1814]/80 backdrop-blur-3xl rounded-[32px] border border-white/10 shadow-2xl'
     }`}
-    style={!fullScreen && !isTab && height ? { height, transition: animateHeight ? 'height 0.3s cubic-bezier(0.4, 0, 0.2, 1)' : undefined } : undefined}
+    style={!fullScreen && !isTab && !isPopup && height ? { height, transition: animateHeight ? 'height 0.3s cubic-bezier(0.4, 0, 0.2, 1)' : undefined } : undefined}
     >
       {/* Header */}
-      {isTab ? (
-        <div className="flex items-center justify-end py-4 px-6 select-none shrink-0">
-          <div className="flex items-center gap-2 text-[#9CA3AF]">
+      {isTab || isPopup ? (
+        <div className={`flex items-center justify-between py-4 px-6 select-none shrink-0${isPopup ? ' [-webkit-app-region:drag]' : ''}`}>
+          {isPopup ? (
+            <div className="flex items-center gap-3 [-webkit-app-region:no-drag]">
+              <button
+                onClick={isStreaming ? handleStop : onClose}
+                className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors ${
+                  isStreaming
+                    ? 'bg-red-500/20 hover:bg-red-500/40 text-red-400'
+                    : 'bg-white/5 hover:bg-white/10'
+                }`}
+              >
+                <X size={14} className={isStreaming ? 'text-red-400' : 'text-gray-400'} />
+              </button>
+              <span className={`w-2 h-2 rounded-full shrink-0 ${getStatusDotClass(session.status, isStreaming)}`} />
+              <span className="font-medium text-white text-sm truncate max-w-[200px]">{session.title}</span>
+            </div>
+          ) : (
+            <div />
+          )}
+          <div className="flex items-center gap-2 text-[#9CA3AF] [-webkit-app-region:no-drag]">
             <div className="relative" ref={historyRef}>
               <button
                 onClick={() => setShowHistory(!showHistory)}
@@ -1026,7 +1069,7 @@ export function SessionWindow({
         ref={scrollContainerRef}
         onMouseDown={(e) => e.stopPropagation()}
         className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar ${
-          isTab ? 'pt-2 px-6 pb-6'
+          isTab || isPopup ? 'pt-2 px-6 pb-6'
           : fullScreen ? 'p-8'
           : `p-6 pt-2${height ? '' : ' max-h-[600px]'}`
         }`}
