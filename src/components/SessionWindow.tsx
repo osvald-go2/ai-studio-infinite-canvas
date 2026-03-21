@@ -1168,19 +1168,20 @@ export function SessionWindow({
                   <ChevronDown size={12} className="text-gray-500" />
                 </button>
                 {showModelPicker && (
-                  <div className="absolute bottom-full left-0 mb-1 z-50 bg-gray-900 border border-white/10 rounded-lg shadow-xl py-1 min-w-[160px]">
+                  <div className="absolute bottom-full left-0 mb-2 z-50 bg-surface/95 backdrop-blur-2xl border border-white/10 rounded-xl shadow-2xl overflow-hidden min-w-[180px]">
+                    <div className="px-3 py-2 border-b border-white/5 text-[11px] font-medium text-gray-500 uppercase tracking-wider">切换模型</div>
                     {getSiblingVariants(session.model).map((v) => (
                       <button
                         key={v.id}
                         onClick={() => handleSwitchModel(v.id)}
-                        className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
+                        className={`w-full text-left px-3 py-2.5 text-sm transition-colors flex items-center justify-between ${
                           v.id === session.model
-                            ? 'text-white bg-white/[0.08]'
-                            : 'text-gray-400 hover:text-white hover:bg-white/[0.06]'
+                            ? 'text-white bg-white/10'
+                            : 'text-gray-300 hover:text-white hover:bg-white/5'
                         }`}
                       >
-                        {v.name}
-                        {v.id === session.model && <Check size={10} className="inline ml-2" />}
+                        <span>{v.name}</span>
+                        {v.id === session.model && <Check size={12} className="text-emerald-400" />}
                       </button>
                     ))}
                   </div>
