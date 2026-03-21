@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Trash2, AlertTriangle, Loader2 } from 'lucide-react';
 import { gitService } from '../../services/git';
+import { useFocusTrap } from '../../utils/useFocusTrap';
 
 export interface DiscardWorktreeDialogProps {
   isOpen: boolean;
@@ -22,6 +23,8 @@ export function DiscardWorktreeDialog({
   const [isRemoving, setIsRemoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const trapRef = useFocusTrap(isOpen, onClose);
+
   if (!isOpen) return null;
 
   const handleConfirm = async () => {
@@ -39,16 +42,17 @@ export function DiscardWorktreeDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
-      <div className="bg-[#2B2D3A]/95 backdrop-blur-2xl border border-white/[0.1] rounded-2xl w-full max-w-sm shadow-2xl">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-md p-4" role="dialog" aria-modal="true" aria-labelledby="discard-dialog-title" ref={trapRef}>
+      <div className="bg-surface-panel/95 backdrop-blur-2xl border border-white/[0.1] rounded-2xl w-full max-w-sm shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between px-6 pt-5 pb-3">
           <div className="flex items-center gap-2">
             <AlertTriangle size={18} className="text-red-400" />
-            <h2 className="text-base font-semibold text-white">Discard Worktree</h2>
+            <h2 id="discard-dialog-title" className="text-base font-semibold text-white">Discard Worktree</h2>
           </div>
           <button
             onClick={onClose}
+            aria-label="Close dialog"
             className="w-7 h-7 rounded-full bg-white/[0.06] hover:bg-white/10 flex items-center justify-center text-gray-500 hover:text-gray-300 transition-colors"
           >
             <X size={15} />

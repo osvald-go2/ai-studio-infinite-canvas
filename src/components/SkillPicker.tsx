@@ -38,7 +38,7 @@ export function SkillPicker({
   return (
     <div
       ref={listRef}
-      className="absolute bottom-full left-0 right-0 mb-2 bg-[#2A2018] border border-white/10 rounded-2xl overflow-hidden shadow-2xl max-h-[240px] overflow-y-auto custom-scrollbar z-50"
+      className="absolute bottom-full left-0 right-0 mb-2 bg-surface-elevated border border-white/10 rounded-2xl overflow-hidden shadow-2xl max-h-[240px] overflow-y-auto custom-scrollbar z-50"
     >
       {skills.map((skill, i) => (
         <button

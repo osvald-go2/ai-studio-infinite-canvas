@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Session } from '../types';
 import { SessionWindow } from './SessionWindow';
 import { ZoomIn, ZoomOut, Maximize, Hand, MousePointer2, Send, Map, LayoutGrid, Plus, Mic, ArrowUp, Settings2 } from 'lucide-react';
-import { SESSION_WIDTH, SESSION_DEFAULT_HEIGHT, SESSION_MIN_HEIGHT, SESSION_GAP, START_X, START_Y } from '@/constants';
+import { SESSION_WIDTH, SESSION_MIN_WIDTH, SESSION_MAX_WIDTH, SESSION_DEFAULT_HEIGHT, SESSION_MIN_HEIGHT, SESSION_GAP, START_X, START_Y } from '@/constants';
 
 export function CanvasView({
   sessions,
@@ -115,7 +115,7 @@ export function CanvasView({
       const session = sessions.find(s => s.id === focusedSessionId);
       if (session) {
         const container = containerRef.current.getBoundingClientRect();
-        const sessionWidth = SESSION_WIDTH;
+        const sessionWidth = session.width ?? SESSION_WIDTH;
         const sessionHeight = session.height ?? SESSION_DEFAULT_HEIGHT;
 
         // Calculate new transform to center the session
@@ -212,7 +212,7 @@ export function CanvasView({
       const maxY = Math.max(selectionBox.startY, y);
       
       const newSelectedIds = sessions.filter(session => {
-        const sessionWidth = SESSION_WIDTH;
+        const sessionWidth = session.width ?? SESSION_WIDTH;
         const sessionHeight = session.height ?? SESSION_DEFAULT_HEIGHT;
         const sMinX = session.position.x;
         const sMaxX = session.position.x + sessionWidth;
@@ -390,6 +390,7 @@ export function CanvasView({
           onClick={() => setToolMode('select')}
           className={`p-2 rounded-lg transition-colors ${toolMode === 'select' ? 'bg-blue-500/50 text-white' : 'text-gray-400 hover:bg-white/10 hover:text-gray-200'}`}
           title="Select Tool"
+          aria-label="Select tool"
         >
           <MousePointer2 size={20} />
         </button>
@@ -397,6 +398,7 @@ export function CanvasView({
           onClick={() => setToolMode('hand')}
           className={`p-2 rounded-lg transition-colors ${toolMode === 'hand' ? 'bg-blue-500/50 text-white' : 'text-gray-400 hover:bg-white/10 hover:text-gray-200'}`}
           title="Pan Tool"
+          aria-label="Pan tool"
         >
           <Hand size={20} />
         </button>
@@ -433,6 +435,7 @@ export function CanvasView({
               value={broadcastMessage}
               onChange={(e) => setBroadcastMessage(e.target.value)}
               placeholder="Message selected sessions..."
+              aria-label="Broadcast message"
               className="w-full bg-transparent text-sm text-white/90 placeholder-gray-500 focus:outline-none resize-none leading-relaxed"
               rows={2}
               onKeyDown={(e) => {
@@ -447,7 +450,7 @@ export function CanvasView({
           {/* Bottom toolbar */}
           <div className="flex items-center justify-between px-4 pb-3 pt-1">
             <div className="flex items-center gap-2">
-              <button className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors border border-white/5">
+              <button aria-label="Add attachment" className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors border border-white/5">
                 <Plus size={16} />
               </button>
               <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors border border-white/5 text-xs font-medium">
@@ -456,12 +459,13 @@ export function CanvasView({
               </button>
             </div>
             <div className="flex items-center gap-2">
-              <button className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-200 transition-colors hover:bg-white/5">
+              <button aria-label="Voice input" className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-200 transition-colors hover:bg-white/5">
                 <Mic size={16} />
               </button>
               <button
                 onClick={handleBroadcast}
                 disabled={!broadcastMessage.trim() || selectedSessionIds.length < 2}
+                aria-label="Send broadcast"
                 className="w-8 h-8 rounded-full bg-white/10 text-white hover:bg-white/20 disabled:bg-white/5 disabled:text-gray-500 flex items-center justify-center transition-colors border border-white/5"
               >
                 <ArrowUp size={16} strokeWidth={2.5} />
@@ -487,17 +491,17 @@ export function CanvasView({
         className="absolute bottom-6 right-6 flex items-center gap-2 bg-black/40 backdrop-blur-md p-2 rounded-xl border border-white/10 z-50 cursor-default ui-overlay"
         onMouseDown={e => e.stopPropagation()}
       >
-        <button onClick={handleZoomIn} className="p-1.5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors" title="Zoom In">
+        <button onClick={handleZoomIn} className="p-1.5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors" title="Zoom In" aria-label="Zoom in">
           <ZoomIn size={18} />
         </button>
         <span className="text-xs font-mono text-gray-400 w-12 text-center select-none">
           {Math.round(transform.scale * 100)}%
         </span>
-        <button onClick={handleZoomOut} className="p-1.5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors" title="Zoom Out">
+        <button onClick={handleZoomOut} className="p-1.5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors" title="Zoom Out" aria-label="Zoom out">
           <ZoomOut size={18} />
         </button>
         <div className="w-px h-4 bg-white/10 mx-1" />
-        <button onClick={handleResetZoom} className="p-1.5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors" title="Reset View">
+        <button onClick={handleResetZoom} className="p-1.5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors" title="Reset View" aria-label="Reset view">
           <Maximize size={18} />
         </button>
         <div className="w-px h-4 bg-white/10 mx-1" />
@@ -505,6 +509,7 @@ export function CanvasView({
           onClick={handleArrangeSessions}
           className="p-1.5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors"
           title="整理画布"
+          aria-label="Arrange canvas"
         >
           <LayoutGrid size={18} />
         </button>
@@ -513,6 +518,7 @@ export function CanvasView({
           onClick={() => setShowMinimap(v => !v)}
           className={`p-1.5 rounded-lg transition-colors ${showMinimap ? 'bg-blue-500/30 text-blue-300' : 'text-gray-300 hover:bg-white/10'}`}
           title="Toggle Minimap"
+          aria-label="Toggle minimap"
         >
           <Map size={18} />
         </button>
@@ -599,7 +605,7 @@ function CanvasMinimap({
     for (const s of sessions) {
       minX = Math.min(minX, s.position.x);
       minY = Math.min(minY, s.position.y);
-      maxX = Math.max(maxX, s.position.x + SESSION_WIDTH);
+      maxX = Math.max(maxX, s.position.x + (s.width ?? SESSION_WIDTH));
       maxY = Math.max(maxY, s.position.y + (s.height ?? SESSION_DEFAULT_HEIGHT));
     }
     return {
@@ -750,7 +756,7 @@ function CanvasMinimap({
         <g transform={`translate(${offsetX}, ${offsetY})`}>
           {sessions.map((s) => {
             const pos = toMinimap(s.position.x, s.position.y);
-            const w = SESSION_WIDTH * minimapScale;
+            const w = (s.width ?? SESSION_WIDTH) * minimapScale;
             const h = (s.height ?? SESSION_DEFAULT_HEIGHT) * minimapScale;
             const isSelected = selectedSessionIds.includes(s.id);
             const color = isSelected ? '#3b82f6' : (MODEL_COLORS[s.model] || '#94a3b8');
@@ -842,6 +848,12 @@ function DraggableSession({
   const [resizeStartY, setResizeStartY] = useState(0);
   const [resizeStartHeight, setResizeStartHeight] = useState(0);
   const [animateHeight, setAnimateHeight] = useState(false);
+
+  // Horizontal resize state
+  const [isResizingX, setIsResizingX] = useState<'left' | 'right' | false>(false);
+  const [resizeStartX, setResizeStartX] = useState(0);
+  const [resizeStartWidth, setResizeStartWidth] = useState(0);
+  const [resizeStartPosX, setResizeStartPosX] = useState(0);
 
   // Capture phase: runs before child stopPropagation can block bubble phase
   const handleMouseDownCapture = (e: React.MouseEvent) => {
@@ -982,6 +994,46 @@ function DraggableSession({
     };
   }, [isResizing, resizeStartY, resizeStartHeight, session, updateSession, transformScale]);
 
+  // Horizontal resize handlers
+  const handleResizeXMouseDown = (side: 'left' | 'right') => (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setIsResizingX(side);
+    setResizeStartX(e.clientX / transformScale);
+    setResizeStartWidth(session.width ?? SESSION_WIDTH);
+    setResizeStartPosX(session.position.x);
+  };
+
+  useEffect(() => {
+    if (!isResizingX) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const deltaX = e.clientX / transformScale - resizeStartX;
+      if (isResizingX === 'right') {
+        const newWidth = Math.min(SESSION_MAX_WIDTH, Math.max(SESSION_MIN_WIDTH, resizeStartWidth + deltaX));
+        updateSession({ ...session, width: newWidth });
+      } else {
+        // Left side: resize + reposition
+        const newWidth = Math.min(SESSION_MAX_WIDTH, Math.max(SESSION_MIN_WIDTH, resizeStartWidth - deltaX));
+        const actualDelta = resizeStartWidth - newWidth;
+        updateSession({
+          ...session,
+          width: newWidth,
+          position: { ...session.position, x: resizeStartPosX + actualDelta },
+        });
+      }
+    };
+
+    const handleMouseUp = () => setIsResizingX(false);
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizingX, resizeStartX, resizeStartWidth, resizeStartPosX, session, updateSession, transformScale]);
+
   // Header double-click: toggle collapse/expand
   const handleHeaderDoubleClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -1009,6 +1061,7 @@ function DraggableSession({
       style={{
         left: session.position.x,
         top: session.position.y,
+        zIndex: isDragging || isResizing || isResizingX ? 30 : isSelected || isFocused ? 20 : 1,
         transition: isArranging && !isDragging ? 'left 0.4s cubic-bezier(0.4, 0, 0.2, 1), top 0.4s cubic-bezier(0.4, 0, 0.2, 1)' : undefined,
       }}
       onContextMenu={(e) => e.stopPropagation()}
@@ -1026,12 +1079,26 @@ function DraggableSession({
         onToggleGitPanel={onToggleGitPanel}
         onCopySession={onCopySession}
       />
-      {/* Resize handle */}
+      {/* Bottom resize handle */}
       <div
         className="absolute bottom-0 left-0 right-0 h-3 cursor-ns-resize group z-10"
         onMouseDown={handleResizeMouseDown}
       >
         <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-12 h-1 rounded-full bg-white/0 group-hover:bg-white/30 transition-colors" />
+      </div>
+      {/* Left resize handle */}
+      <div
+        className="absolute top-0 left-0 bottom-0 w-2 cursor-ew-resize z-10 group"
+        onMouseDown={handleResizeXMouseDown('left')}
+      >
+        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-12 rounded-full bg-white/0 group-hover:bg-white/30 transition-colors" />
+      </div>
+      {/* Right resize handle */}
+      <div
+        className="absolute top-0 right-0 bottom-0 w-2 cursor-ew-resize z-10 group"
+        onMouseDown={handleResizeXMouseDown('right')}
+      >
+        <div className="absolute right-0 top-1/2 -translate-y-1/2 w-0.5 h-12 rounded-full bg-white/0 group-hover:bg-white/30 transition-colors" />
       </div>
     </div>
   );

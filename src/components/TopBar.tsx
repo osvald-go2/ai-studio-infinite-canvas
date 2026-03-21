@@ -76,9 +76,19 @@ export function TopBar({
         setIsSearchOpen(false);
       }
     };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        if (isProjectDropdownOpen) setIsProjectDropdownOpen(false);
+        if (isSearchOpen) setIsSearchOpen(false);
+      }
+    };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isProjectDropdownOpen, isSearchOpen]);
 
   const projectList = projects ?? [];
 
@@ -97,7 +107,7 @@ export function TopBar({
   };
 
   return (
-    <div
+    <header
       className="h-14 border-b border-white/10 bg-black/20 backdrop-blur-md z-50 relative"
       style={{ paddingLeft: isFullScreen ? '16px' : '86px', WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
@@ -106,9 +116,9 @@ export function TopBar({
         onDoubleClick={handleTitleBarDoubleClick}
       >
       <div className="flex items-center gap-4">
-        <div className="font-semibold text-lg bg-gradient-to-r from-orange-400 to-rose-400 bg-clip-text text-transparent">
+        <h1 className="font-semibold text-lg bg-gradient-to-r from-orange-400 to-rose-400 bg-clip-text text-transparent">
           AI Studio
-        </div>
+        </h1>
 
         {/* Project Switcher */}
         <div className="relative" ref={dropdownRef} style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
@@ -133,7 +143,7 @@ export function TopBar({
           </button>
 
           {isProjectDropdownOpen && (
-            <div className="absolute top-full left-0 mt-2 w-[420px] bg-[#1E1814]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50">
+            <div className="absolute top-full left-0 mt-2 w-[420px] bg-surface/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50">
               {projectList.length > 0 && (
                 <div className="p-2">
                   <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wider px-3 py-2">Recent Projects</div>
@@ -223,6 +233,7 @@ export function TopBar({
               ref={searchInputRef}
               type="text"
               placeholder="Search sessions...  ⌘K"
+              aria-label="Search sessions"
               value={searchQuery}
               onChange={(e) => {
                 setSearchQuery(e.target.value);
@@ -234,7 +245,7 @@ export function TopBar({
           </div>
           
           {isSearchOpen && searchQuery && (
-            <div className="absolute top-full right-0 mt-2 w-80 bg-[#3B3F4F]/95 backdrop-blur-2xl border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 max-h-96 flex flex-col">
+            <div className="absolute top-full right-0 mt-2 w-80 bg-surface-overlay/95 backdrop-blur-2xl border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 max-h-96 flex flex-col">
               <div className="p-2 overflow-y-auto custom-scrollbar">
                 {filteredSessions.length > 0 ? (
                   filteredSessions.map(session => (
@@ -284,6 +295,7 @@ export function TopBar({
           <button
             onClick={onToggleTerminal}
             title="Toggle Terminal (Ctrl+`)"
+            aria-label="Toggle Terminal"
             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
               showTerminal
@@ -298,6 +310,7 @@ export function TopBar({
           <button
             onClick={onToggleGitPanel}
             title="Toggle Git Panel"
+            aria-label="Toggle Git Panel"
             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
               showGitPanel
@@ -314,6 +327,6 @@ export function TopBar({
         </button>
       </div>
       </div>
-    </div>
+    </header>
   );
 }

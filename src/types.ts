@@ -57,6 +57,7 @@ export interface Session {
   hasChanges?: boolean;
   changeCount?: number;
   height?: number;
+  width?: number;
   prevHeight?: number;
   claudeSessionId?: string;
   codexThreadId?: string;

@@ -13,8 +13,8 @@ export function getStatusDotClass(status: SessionStatus, isStreaming = false): s
 }
 
 export const STATUS_COLORS: Record<SessionStatus, { badgeBg: string; badgeText: string }> = {
-  inbox:     { badgeBg: 'bg-[#6B728033]', badgeText: 'text-[#9CA3AF]' },
-  inprocess: { badgeBg: 'bg-[#3B82F633]', badgeText: 'text-[#60A5FA]' },
-  review:    { badgeBg: 'bg-[#F59E0B33]', badgeText: 'text-[#FBBF24]' },
-  done:      { badgeBg: 'bg-[#10B98133]', badgeText: 'text-[#34D399]' },
+  inbox:     { badgeBg: 'bg-gray-500/20', badgeText: 'text-gray-400' },
+  inprocess: { badgeBg: 'bg-blue-500/20', badgeText: 'text-blue-400' },
+  review:    { badgeBg: 'bg-amber-500/20', badgeText: 'text-amber-400' },
+  done:      { badgeBg: 'bg-emerald-500/20', badgeText: 'text-emerald-400' },
 };

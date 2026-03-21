@@ -9,6 +9,16 @@ import { SkillBlock } from './SkillBlock';
 import { FileChangesBlock } from './FileChangesBlock';
 import { CodeBlock } from '../CodeBlock';
 import { FormTableBlock } from './FormTableBlock';
+import { ToolCallSummary } from './ToolCallSummary';
+
+/** Block types that get folded into a collapsible summary */
+function isToolBlock(b: ContentBlock): b is Extract<ContentBlock, { type: 'tool_call' }> | Extract<ContentBlock, { type: 'skill' }> {
+  return b.type === 'tool_call' || b.type === 'skill';
+}
+
+type GroupItem =
+  | { kind: 'block'; block: ContentBlock; index: number }
+  | { kind: 'tool_group'; blocks: (Extract<ContentBlock, { type: 'tool_call' }> | Extract<ContentBlock, { type: 'skill' }>)[]; startIndex: number };
 
 export function ContentBlocksView({
   blocks,
@@ -24,44 +34,36 @@ export function ContentBlocksView({
     b => !(b.type === 'text' && b.content.startsWith('Connected:'))
   );
 
-  // Group consecutive done Read/Write tool_calls into a single summary line
-  const grouped: { block: ContentBlock; index: number; grouped?: ContentBlock[] }[] = [];
-  const COLLAPSIBLE = new Set(['read', 'write']);
+  // Only keep the last todolist block (feels like one list refreshing, not many)
+  const lastTodoIndex = visibleBlocks.reduce(
+    (acc, b, i) => (b.type === 'todolist' ? i : acc), -1
+  );
+
+  // Group consecutive tool_call/skill blocks into collapsible summaries
+  const groups: GroupItem[] = [];
 
   for (let i = 0; i < visibleBlocks.length; i++) {
     const block = visibleBlocks[i];
-    if (
-      block.type === 'tool_call' &&
-      block.status === 'done' &&
-      COLLAPSIBLE.has(block.tool.toLowerCase())
-    ) {
-      const prev = grouped[grouped.length - 1];
-      if (
-        prev?.block.type === 'tool_call' &&
-        prev.block.status === 'done' &&
-        prev.block.tool.toLowerCase() === block.tool.toLowerCase()
-      ) {
-        if (!prev.grouped) prev.grouped = [prev.block];
-        prev.grouped.push(block);
-        continue;
+    if (isToolBlock(block)) {
+      const last = groups[groups.length - 1];
+      if (last?.kind === 'tool_group') {
+        last.blocks.push(block);
+      } else {
+        groups.push({ kind: 'tool_group', blocks: [block], startIndex: i });
       }
+    } else {
+      groups.push({ kind: 'block', block, index: i });
     }
-    grouped.push({ block, index: i });
   }
 
   return (
     <div className="space-y-2.5">
-      {grouped.map(({ block, index, grouped: grp }) => {
-        const isLast = index === visibleBlocks.length - 1;
-        if (grp && block.type === 'tool_call') {
-          return (
-            <ToolCallBlock
-              key={index}
-              {...block}
-              description={`${grp.length} files`}
-            />
-          );
+      {groups.map((item, gi) => {
+        if (item.kind === 'tool_group') {
+          return <ToolCallSummary key={`tg-${item.startIndex}`} blocks={item.blocks} />;
         }
+        const { block, index } = item;
+        const isLast = index === visibleBlocks.length - 1;
         switch (block.type) {
           case 'text':
             return <TextBlock key={index} content={block.content} isStreaming={isStreaming && isLast} />;
@@ -70,7 +72,8 @@ export function ContentBlocksView({
           case 'tool_call':
             return <ToolCallBlock key={index} {...block} />;
           case 'todolist':
-            return <TodoListBlock key={index} items={block.items} />;
+            if (index !== lastTodoIndex) return null;
+            return <TodoListBlock key="todolist-latest" items={block.items} />;
           case 'subagent':
             return <SubagentBlock key={index} {...block} />;
           case 'askuser':

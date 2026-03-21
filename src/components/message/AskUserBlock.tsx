@@ -39,10 +39,11 @@ function QuestionPanel({
       {/* Options list */}
       <div className="border-t border-white/5">
         {q.options?.map((opt, i) => (
-          <div
+          <button
             key={i}
+            type="button"
             onClick={() => setSelected(i)}
-            className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors border-b border-white/5 last:border-b-0 ${
+            className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors border-b border-white/5 last:border-b-0 w-full text-left ${
               selected === i ? 'bg-white/[0.04]' : 'hover:bg-white/[0.02]'
             }`}
           >
@@ -52,7 +53,7 @@ function QuestionPanel({
               {i + 1}
             </span>
             <span className={`text-sm ${selected === i ? 'text-gray-200' : 'text-gray-300'}`}>{opt}</span>
-          </div>
+          </button>
         ))}
 
         {/* Custom input row */}
@@ -74,6 +75,7 @@ function QuestionPanel({
           <button
             onClick={handleSubmitAnswer}
             disabled={selected === null && !customInput.trim()}
+            aria-label="Submit answer"
             className="w-6 h-6 rounded-md bg-white/10 hover:bg-white/15 disabled:opacity-30 flex items-center justify-center text-gray-300 transition-colors shrink-0"
           >
             <ChevronRight size={13} />

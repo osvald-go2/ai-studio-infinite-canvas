@@ -46,11 +46,16 @@ function FileRow({
 
   return (
     <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
+      onKeyDown={(e) => { if (e.key === 'Enter') onClick(); if (e.key === ' ') { e.preventDefault(); onClick(); } }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className="flex items-center justify-between h-[26px] pl-6 pr-3 cursor-pointer hover:bg-white/[0.04] transition-colors"
+      onFocus={() => setHovered(true)}
+      onBlur={() => setHovered(false)}
+      className="flex items-center justify-between h-[26px] pl-6 pr-3 cursor-pointer hover:bg-white/[0.04] focus-visible:bg-white/[0.04] focus-visible:outline-none transition-colors"
     >
       <div className="flex items-center gap-1.5 min-w-0 flex-1">
         <FileText size={13} className="text-zinc-500 flex-shrink-0" />
@@ -67,6 +72,7 @@ function FileRow({
             onClick={onDiscard}
             className="w-5 h-5 rounded flex items-center justify-center text-zinc-500 hover:text-white hover:bg-white/10 transition-colors"
             title="Discard changes"
+            aria-label="Discard changes"
           >
             <Undo2 size={11} />
           </button>
@@ -136,6 +142,7 @@ export function ChangesTab({ onOpenDiff }: ChangesTabProps) {
         <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.06] flex-shrink-0">
           <button
             onClick={() => setDiffFile(null)}
+            aria-label="Back to changes list"
             className="flex items-center justify-center w-6 h-6 rounded hover:bg-white/10 text-zinc-400 hover:text-white transition-colors flex-shrink-0"
           >
             <ChevronLeft size={16} />
@@ -185,9 +192,11 @@ export function ChangesTab({ onOpenDiff }: ChangesTabProps) {
       {/* Changes section */}
       <div className="flex-[3] flex flex-col min-h-0 overflow-y-auto custom-scrollbar">
         {/* Changes header */}
-        <div
-          className="flex items-center justify-between h-7 px-3 flex-shrink-0 cursor-pointer hover:bg-white/[0.03] group"
+        <button
+          type="button"
+          className="flex items-center justify-between h-7 px-3 w-full flex-shrink-0 cursor-pointer hover:bg-white/[0.03] group"
           onClick={() => setChangesOpen((v) => !v)}
+          aria-expanded={changesOpen}
         >
           <div className="flex items-center gap-1">
             {changesOpen
@@ -199,7 +208,7 @@ export function ChangesTab({ onOpenDiff }: ChangesTabProps) {
               <span className="text-[11px] text-zinc-500 ml-0.5">{changes.length}</span>
             )}
           </div>
-        </div>
+        </button>
 
         {changesOpen && (
           <>
