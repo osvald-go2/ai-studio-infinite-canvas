@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Session, SessionStatus } from '../types';
+import { getModelDisplayName } from '../models';
 import { MessageSquare, MoreHorizontal, Circle, ZoomIn, ZoomOut, Maximize, GitBranch, GitFork, Trash2 } from 'lucide-react';
 import { SessionWindow } from './SessionWindow';
 
@@ -273,7 +274,7 @@ export function BoardView({
                     </p>
                     <div className="flex items-center justify-between mt-auto">
                       <span className="text-xs font-medium text-gray-400 bg-white/5 px-2 py-1 rounded-md">
-                        {session.model}
+                        {getModelDisplayName(session.model)}
                       </span>
                       <div className="flex items-center gap-1 text-gray-500 text-xs">
                         <MessageSquare size={12} />

@@ -7,6 +7,20 @@ use crate::claude::client::ClaudeProcess;
 use crate::protocol::OutgoingMessage;
 use super::types::{Session, SessionSummary};
 
+fn model_cli_flag(model_id: &str) -> Option<&'static str> {
+    match model_id {
+        "claude-sonnet-4-6"  => Some("sonnet"),
+        "claude-opus-4-6"    => Some("opus"),
+        "codex-gpt-5-4"      => Some("gpt-5.4"),
+        "codex-gpt-5-4-mini" => Some("gpt-5.4-mini"),
+        _ => None,
+    }
+}
+
+fn is_codex_model(model: &str) -> bool {
+    model.starts_with("codex")
+}
+
 #[derive(Debug)]
 pub enum SessionError {
     NotFound(String),
@@ -107,7 +121,7 @@ impl SessionManager {
             let sessions = self.sessions.lock().unwrap();
             let active = sessions.get(session_id)
                 .ok_or_else(|| SessionError::NotFound(session_id.to_string()))?;
-            active.info.model == "codex"
+            is_codex_model(&active.info.model)
         };
 
         if is_codex {
@@ -115,16 +129,16 @@ impl SessionManager {
             use crate::codex::client::CodexProcess;
 
             let working_dir = self.working_dir.lock().unwrap().clone();
-            let resume_tid = {
+            let (resume_tid, cli_flag) = {
                 let sessions = self.sessions.lock().unwrap();
                 let active = sessions.get(session_id).unwrap();
-                active.codex_thread_id.clone()
+                (active.codex_thread_id.clone(), model_cli_flag(&active.info.model))
             };
 
             eprintln!("[codex] spawning codex in {}, resume_tid: {:?}", working_dir, resume_tid);
 
             let (process, event_rx, stderr_rx) =
-                CodexProcess::spawn(&working_dir, text, resume_tid.as_deref())
+                CodexProcess::spawn(&working_dir, text, resume_tid.as_deref(), cli_flag)
                     .map_err(|e| {
                         eprintln!("[codex] spawn failed: {}", e);
                         SessionError::SpawnFailed(e)
@@ -186,7 +200,8 @@ impl SessionManager {
                     // Spawn new claude CLI process, passing resume ID if available
                     let working_dir = self.working_dir.lock().unwrap().clone();
                     let resume_id = active.claude_session_id.as_deref();
-                    let (process, msg_rx) = ClaudeProcess::spawn(&working_dir, resume_id)
+                    let cli_flag = model_cli_flag(&active.info.model);
+                    let (process, msg_rx) = ClaudeProcess::spawn(&working_dir, resume_id, cli_flag)
                         .map_err(|e| SessionError::SpawnFailed(e))?;
 
                     let process = Arc::new(process);
@@ -231,6 +246,21 @@ impl SessionManager {
 
             Ok(())
         }
+    }
+
+    pub fn switch_model(&self, session_id: &str, new_model: String) -> Result<(), SessionError> {
+        let mut sessions = self.sessions.lock().unwrap();
+        let active = sessions.get_mut(session_id)
+            .ok_or_else(|| SessionError::NotFound(session_id.to_string()))?;
+        let old_is_codex = is_codex_model(&active.info.model);
+        let new_is_codex = is_codex_model(&new_model);
+        if old_is_codex != new_is_codex {
+            return Err(SessionError::SpawnFailed("cross-provider model switch not supported".into()));
+        }
+        active.claude_process = None;
+        active.codex_process = None;
+        active.info.model = new_model;
+        Ok(())
     }
 
     pub fn list(&self) -> Vec<SessionSummary> {
@@ -281,7 +311,7 @@ impl SessionManager {
         let sessions = self.sessions.lock().unwrap();
         let active = sessions.get(session_id)
             .ok_or_else(|| SessionError::NotFound(session_id.to_string()))?;
-        if active.info.model == "codex" {
+        if is_codex_model(&active.info.model) {
             if let Some(ref process) = active.codex_process {
                 process.interrupt().map_err(|e| SessionError::SpawnFailed(e))?;
             }

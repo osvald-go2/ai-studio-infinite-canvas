@@ -9,6 +9,7 @@ import { getStatusDotClass } from '../utils/statusColors';
 import { SkillPicker } from './SkillPicker';
 import { scanSkills } from '../services/skillScanner';
 import { useGit } from '../contexts/GitProvider';
+import { getAgentType, getModelDisplayName, getModelFullLabel, getSiblingVariants } from '../models';
 
 function isElectron(): boolean {
   return typeof window !== 'undefined' && window.aiBackend !== undefined;
@@ -55,6 +56,8 @@ export function SessionWindow({
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [showModelPicker, setShowModelPicker] = useState(false);
+  const modelPickerRef = useRef<HTMLDivElement>(null);
 
   const emitIsland = useCallback((method: 'emitSessionUpdate' | 'emitMessageStream' | 'emitNotification', data: any) => {
     if (isElectron() && window.aiBackend[method]) {
@@ -122,6 +125,17 @@ export function SessionWindow({
     document.addEventListener('mousedown', handleClickOutside, true);
     return () => document.removeEventListener('mousedown', handleClickOutside, true);
   }, [showHistory]);
+
+  useEffect(() => {
+    if (!showModelPicker) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modelPickerRef.current && !modelPickerRef.current.contains(e.target as Node)) {
+        setShowModelPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside, true);
+    return () => document.removeEventListener('mousedown', handleClickOutside, true);
+  }, [showModelPicker]);
 
   const formatRelativeTime = (ts?: number) => {
     if (!ts) return '';
@@ -373,7 +387,7 @@ export function SessionWindow({
           if (!backendSessionIdRef.current) {
             console.log('[session] creating backend session, model:', session.model);
             const sid = await backend.createSession(session.model,
-              sessionRef.current.model === 'codex'
+              getAgentType(sessionRef.current.model) === 'codex'
                 ? { codexThreadId: sessionRef.current.codexThreadId }
                 : { claudeSessionId: sessionRef.current.claudeSessionId }
             );
@@ -451,7 +465,7 @@ export function SessionWindow({
           if (isElectron()) {
             if (!backendSessionIdRef.current) {
               const sid = await backend.createSession(session.model,
-              sessionRef.current.model === 'codex'
+              getAgentType(sessionRef.current.model) === 'codex'
                 ? { codexThreadId: sessionRef.current.codexThreadId }
                 : { claudeSessionId: sessionRef.current.claudeSessionId }
             );
@@ -466,7 +480,7 @@ export function SessionWindow({
               setBackendSessionId(null);
               try {
                 const sid = await backend.createSession(session.model,
-              sessionRef.current.model === 'codex'
+              getAgentType(sessionRef.current.model) === 'codex'
                 ? { codexThreadId: sessionRef.current.codexThreadId }
                 : { claudeSessionId: sessionRef.current.claudeSessionId }
             );
@@ -554,7 +568,7 @@ export function SessionWindow({
       // Create backend session if not already created
       if (!backendSessionIdRef.current) {
         const sid = await backend.createSession(session.model,
-              sessionRef.current.model === 'codex'
+              getAgentType(sessionRef.current.model) === 'codex'
                 ? { codexThreadId: sessionRef.current.codexThreadId }
                 : { claudeSessionId: sessionRef.current.claudeSessionId }
             );
@@ -570,7 +584,7 @@ export function SessionWindow({
         setBackendSessionId(null);
         try {
           const sid = await backend.createSession(session.model,
-              sessionRef.current.model === 'codex'
+              getAgentType(sessionRef.current.model) === 'codex'
                 ? { codexThreadId: sessionRef.current.codexThreadId }
                 : { claudeSessionId: sessionRef.current.claudeSessionId }
             );
@@ -795,6 +809,34 @@ export function SessionWindow({
 
   const handleTitleCancel = () => {
     setIsEditingTitle(false);
+  };
+
+  const handleSwitchModel = async (newModelId: string) => {
+    if (newModelId === session.model) return;
+    setShowModelPicker(false);
+
+    if (backendSessionIdRef.current) {
+      try {
+        await backend.switchModel(backendSessionIdRef.current, newModelId);
+      } catch (e) {
+        console.warn('[model switch error]', e);
+      }
+    }
+
+    const systemMsg: Message = {
+      id: Date.now().toString(),
+      role: 'system',
+      content: `模型已切换为 ${getModelDisplayName(newModelId)}`,
+      timestamp: Date.now(),
+    };
+
+    const updated = {
+      ...sessionRef.current,
+      model: newModelId,
+      messages: [...sessionRef.current.messages, systemMsg],
+    };
+    sessionRef.current = updated;
+    onUpdate(updated);
   };
 
   const handleTitleDoubleClick = (e: React.MouseEvent) => {
@@ -1263,12 +1305,41 @@ export function SessionWindow({
               <button aria-label="Add attachment" className="w-8 h-8 rounded-full flex items-center justify-center transition-colors bg-white/[0.06] text-gray-400 hover:text-white hover:bg-white/10">
                 <Plus size={16} />
               </button>
-              <button className={`flex items-center gap-1.5 rounded-full font-medium transition-colors ${
-                isTab ? 'bg-white/[0.1] px-2 py-0.5 text-[11px] text-gray-300 hover:text-white hover:bg-white/20' : 'bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white px-3 py-1 text-xs border border-white/5'
-              }`}>
-                {session.model === 'codex' ? 'Codex' : session.model === 'gemini-cli' ? 'Gemini CLI' : 'Claude Code'}
-                <ChevronDown size={12} className="text-gray-500" />
-              </button>
+              {/* Model variant switcher */}
+              <div className="relative" ref={modelPickerRef}>
+                <button
+                  onClick={() => setShowModelPicker(!showModelPicker)}
+                  disabled={isStreaming}
+                  className={`flex items-center gap-1.5 rounded-full font-medium transition-colors ${
+                    isStreaming
+                      ? 'opacity-40 cursor-not-allowed text-gray-500'
+                      : isTab ? 'bg-white/[0.1] px-2 py-0.5 text-[11px] text-gray-300 hover:text-white hover:bg-white/20' : 'bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white px-3 py-1 text-xs border border-white/5'
+                  }`}
+                  title={isStreaming ? '流式响应中无法切换模型' : '切换模型'}
+                >
+                  {getModelFullLabel(session.model)}
+                  <ChevronDown size={12} className="text-gray-500" />
+                </button>
+                {showModelPicker && (
+                  <div className="absolute bottom-full left-0 mb-2 z-50 bg-surface/95 backdrop-blur-2xl border border-white/10 rounded-xl shadow-2xl overflow-hidden min-w-[180px]">
+                    <div className="px-3 py-2 border-b border-white/5 text-[11px] font-medium text-gray-500 uppercase tracking-wider">切换模型</div>
+                    {getSiblingVariants(session.model).map((v) => (
+                      <button
+                        key={v.id}
+                        onClick={() => handleSwitchModel(v.id)}
+                        className={`w-full text-left px-3 py-2.5 text-sm transition-colors flex items-center justify-between ${
+                          v.id === session.model
+                            ? 'text-white bg-white/10'
+                            : 'text-gray-300 hover:text-white hover:bg-white/5'
+                        }`}
+                      >
+                        <span>{v.name}</span>
+                        {v.id === session.model && <Check size={12} className="text-emerald-400" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {(totalAdditions > 0 || totalDeletions > 0) && (
                 <button

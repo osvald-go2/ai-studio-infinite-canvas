@@ -1,10 +1,5 @@
 import { SkillInfo } from '../types';
-
-const MODEL_TO_PLATFORM: Record<string, string> = {
-  'claude-code': 'claude',
-  'codex': 'codex',
-  'gemini-cli': 'gemini',
-};
+import { getAgentType } from '../models';
 
 const MOCK_SKILLS: SkillInfo[] = [
   { name: 'commit', description: 'Create a git commit with AI-generated message', filePath: 'mock', source: 'project' },
@@ -22,9 +17,8 @@ function isElectron(): boolean {
 }
 
 export async function scanSkills(model: string, projectDir?: string | null): Promise<SkillInfo[]> {
-  const platform = MODEL_TO_PLATFORM[model];
+  const platform = getAgentType(model);
   console.log(`[skillScanner] model=${model}, platform=${platform}, projectDir=${projectDir}, isElectron=${isElectron()}`);
-  if (!platform) return [];
 
   if (isElectron() && projectDir) {
     try {

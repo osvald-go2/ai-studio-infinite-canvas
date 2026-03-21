@@ -63,12 +63,6 @@ export interface Session {
   codexThreadId?: string;
 }
 
-export function getAgentType(model: string): 'claude' | 'codex' {
-  if (model.startsWith('claude')) return 'claude';
-  if (model === 'codex') return 'codex';
-  return 'claude';
-}
-
 export interface DbProject {
   id: number;
   name: string;
