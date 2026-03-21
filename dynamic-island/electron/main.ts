@@ -10,6 +10,11 @@ let lastSessionsSync: any = null
 
 app.dock?.hide()
 
+// Ensure clean exit when parent sends SIGTERM
+process.on('SIGTERM', () => {
+  app.quit()
+})
+
 app.whenReady().then(() => {
   console.log('[Island] App ready, checking hardware...')
 

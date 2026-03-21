@@ -49,7 +49,23 @@ export function spawnIsland(): void {
 
 export function killIsland(): void {
   if (!islandProcess) return
-  islandProcess.kill()
+  const proc = islandProcess
+  proc.kill('SIGTERM')
+
+  // If SIGTERM doesn't work within 2s, force kill
+  const forceKillTimer = setTimeout(() => {
+    try {
+      if (proc.pid && !proc.killed) {
+        process.kill(proc.pid, 'SIGKILL')
+      }
+    } catch {
+      // already dead — ignore
+    }
+  }, 2000)
+
+  proc.on('exit', () => {
+    clearTimeout(forceKillTimer)
+  })
 }
 
 export function isIslandRunning(): boolean {
