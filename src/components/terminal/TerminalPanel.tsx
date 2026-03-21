@@ -109,7 +109,7 @@ export function TerminalPanel({ onClose, cwd }: TerminalPanelProps) {
 
   return (
     <div
-      className="flex flex-col shrink-0 bg-[#1E1814]/60 backdrop-blur-3xl border-t border-white/10 relative"
+      className="flex flex-col shrink-0 bg-surface/60 backdrop-blur-3xl border-t border-white/10 relative"
       style={{ height: panelHeight }}
     >
       {/* Drag handle */}

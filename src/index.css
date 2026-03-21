@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+@theme {
+  /* Surface colors — dark warm palette */
+  --color-surface: #1E1814;
+  --color-surface-elevated: #2A2520;
+  --color-surface-panel: #2B2D3A;
+  --color-surface-overlay: #3B3F4F;
+}
+
 pre {
   white-space: pre;
 }
@@ -50,3 +58,10 @@ pre {
 }
 .thinking-dot:nth-child(2) { animation-delay: 0.2s; }
 .thinking-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-breathe,
+  .thinking-dot {
+    animation: none;
+  }
+}

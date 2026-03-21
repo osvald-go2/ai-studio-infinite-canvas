@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, GitMerge, ChevronDown, Loader2, AlertCircle } from 'lucide-react';
 import { gitService } from '../../services/git';
 import type { BranchInfo } from '../../types/git';
+import { useFocusTrap } from '../../utils/useFocusTrap';
 
 export interface MergeDialogProps {
   isOpen: boolean;
@@ -39,6 +40,8 @@ export function MergeDialog({
     });
   }, [isOpen, projectDir, branch]);
 
+  const trapRef = useFocusTrap(isOpen, onClose);
+
   if (!isOpen) return null;
 
   const handleConfirm = async () => {
@@ -59,16 +62,17 @@ export function MergeDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
-      <div className="bg-[#2B2D3A]/95 backdrop-blur-2xl border border-white/[0.1] rounded-2xl w-full max-w-md shadow-2xl">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-md p-4" role="dialog" aria-modal="true" aria-labelledby="merge-dialog-title" ref={trapRef}>
+      <div className="bg-surface-panel/95 backdrop-blur-2xl border border-white/[0.1] rounded-2xl w-full max-w-md shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between px-6 pt-5 pb-3">
           <div className="flex items-center gap-2">
             <GitMerge size={18} className="text-emerald-400" />
-            <h2 className="text-base font-semibold text-white">Merge Worktree</h2>
+            <h2 id="merge-dialog-title" className="text-base font-semibold text-white">Merge Worktree</h2>
           </div>
           <button
             onClick={onClose}
+            aria-label="Close dialog"
             className="w-7 h-7 rounded-full bg-white/[0.06] hover:bg-white/10 flex items-center justify-center text-gray-500 hover:text-gray-300 transition-colors"
           >
             <X size={15} />
@@ -87,13 +91,14 @@ export function MergeDialog({
             <select
               value={targetBranch}
               onChange={(e) => setTargetBranch(e.target.value)}
+              aria-label="Target branch"
               className="w-full bg-white/[0.06] border border-white/[0.1] rounded-xl px-4 py-2.5 text-white text-sm outline-none focus:border-white/20 appearance-none cursor-pointer"
             >
               {branches.map((b) => (
-                <option key={b.name} value={b.name}>{b.name}</option>
+                <option className="bg-gray-900 text-white" key={b.name} value={b.name}>{b.name}</option>
               ))}
               {branches.length === 0 && (
-                <option value="main">main</option>
+                <option className="bg-gray-900 text-white" value="main">main</option>
               )}
             </select>
           </div>

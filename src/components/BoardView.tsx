@@ -187,7 +187,7 @@ export function BoardView({
               <div className="flex items-center justify-between px-2">
                 <div className="flex items-center gap-2">
                   <Circle size={10} className={`${col.dotColor} fill-current`} />
-                  <h3 className={`font-medium ${col.color}`}>{col.title}</h3>
+                  <h2 className={`font-medium ${col.color}`}>{col.title}</h2>
                 </div>
                 <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${col.badgeBg}`}>
                   {sessions.filter(s => s.status === col.id).length}
@@ -223,12 +223,14 @@ export function BoardView({
                         <button
                           onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === session.id ? null : session.id); }}
                           className="text-gray-500 hover:text-gray-300"
+                          aria-label="Session options"
+                          aria-expanded={menuOpenId === session.id}
                         >
                           <MoreHorizontal size={16} />
                         </button>
                         {menuOpenId === session.id && (
                           <div
-                            className="absolute right-0 top-full mt-1 w-36 bg-[#2A2520] border border-white/10 rounded-lg shadow-xl z-50 py-1"
+                            className="absolute right-0 top-full mt-1 w-36 bg-surface-elevated border border-white/10 rounded-lg shadow-xl z-50 py-1"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <button
@@ -283,17 +285,17 @@ export function BoardView({
 
         {/* Zoom Controls */}
         <div className="absolute bottom-6 left-6 flex items-center gap-2 bg-black/40 backdrop-blur-md p-2 rounded-xl border border-white/10 z-10 no-pan cursor-default">
-          <button onClick={handleZoomIn} className="p-1.5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors" title="Zoom In">
+          <button onClick={handleZoomIn} className="p-1.5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors" title="Zoom In" aria-label="Zoom in">
             <ZoomIn size={18} />
           </button>
           <span className="text-xs font-mono text-gray-400 w-12 text-center select-none">
             {Math.round(transform.scale * 100)}%
           </span>
-          <button onClick={handleZoomOut} className="p-1.5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors" title="Zoom Out">
+          <button onClick={handleZoomOut} className="p-1.5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors" title="Zoom Out" aria-label="Zoom out">
             <ZoomOut size={18} />
           </button>
           <div className="w-px h-4 bg-white/10 mx-1" />
-          <button onClick={handleResetZoom} className="p-1.5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors" title="Reset View">
+          <button onClick={handleResetZoom} className="p-1.5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors" title="Reset View" aria-label="Reset view">
             <Maximize size={18} />
           </button>
         </div>
@@ -301,7 +303,7 @@ export function BoardView({
 
       {/* Right Sidebar for Active Session */}
       <div
-        className={`absolute right-0 top-0 h-full w-[500px] border-l border-white/10 bg-[#1E1814]/80 backdrop-blur-3xl flex flex-col shadow-2xl z-20 transition-transform duration-300 ease-in-out ${
+        className={`absolute right-0 top-0 h-full w-[500px] border-l border-white/10 bg-surface/80 backdrop-blur-3xl flex flex-col shadow-2xl z-20 transition-transform duration-300 ease-in-out ${
           activeSessionId ? 'translate-x-0' : 'translate-x-full'
         }`}
       >

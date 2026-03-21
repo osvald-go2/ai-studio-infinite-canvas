@@ -105,7 +105,7 @@ export function SourceControlPanel({
   };
 
   return (
-    <div ref={containerRef} className="w-[420px] flex-shrink-0 flex flex-col h-full bg-[#2B2D3A]/95 backdrop-blur-2xl border-l border-white/10">
+    <div ref={containerRef} className="w-[420px] flex-shrink-0 flex flex-col h-full bg-surface-panel/95 backdrop-blur-2xl border-l border-white/10">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06]">
         <h2 className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Source Control</h2>

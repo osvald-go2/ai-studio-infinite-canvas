@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Clock, Plus, MessageSquare, Send, Copy, ThumbsUp, ThumbsDown, ArrowUp, Square, Minus, Check, Pencil, RotateCcw, GitBranch, GitFork, Trash2 } from 'lucide-react';
+import { X, Clock, Plus, MessageSquare, Send, Copy, ThumbsUp, ThumbsDown, ArrowUp, Square, Minus, Check, Pencil, RotateCcw, GitBranch, GitFork, Trash2, ChevronDown, Loader2 } from 'lucide-react';
 import { Session, Message, ContentBlock, SkillInfo } from '../types';
 import { MessageRenderer } from './message/MessageRenderer';
 import { STRUCTURED_MOCK_RESPONSES } from '../utils/mockResponses';
@@ -728,28 +728,38 @@ export function SessionWindow({
     }
   }, [isEditingTitle]);
 
-  // ESC 键中断 streaming
+  // ESC 键中断 streaming 或关闭 history popover
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isStreamingRef.current) {
-        handleStop();
+      if (e.key === 'Escape') {
+        if (showHistory) {
+          setShowHistory(false);
+          return;
+        }
+        if (isStreamingRef.current) {
+          handleStop();
+        }
       }
     };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
-  }, []);
+  }, [showHistory]);
 
   const isTab = variant === 'tab';
 
   return (
     <div className={`flex flex-col overflow-hidden text-sm text-gray-200 ${
       isTab
-        ? 'w-full h-full bg-[#1E1814]/80 backdrop-blur-3xl'
+        ? 'w-full h-full bg-surface/80 backdrop-blur-3xl'
         : fullScreen
           ? 'w-full h-full bg-transparent'
-          : 'w-[600px] bg-[#1E1814]/80 backdrop-blur-3xl rounded-[32px] border border-white/10 shadow-2xl'
+          : 'bg-surface/80 backdrop-blur-3xl rounded-[32px] border border-white/10 shadow-2xl'
     }`}
-    style={!fullScreen && !isTab && height ? { height, transition: animateHeight ? 'height 0.3s cubic-bezier(0.4, 0, 0.2, 1)' : undefined } : undefined}
+    style={!fullScreen && !isTab ? {
+      width: session.width ?? 600,
+      ...(height ? { height } : {}),
+      transition: animateHeight ? 'height 0.3s cubic-bezier(0.4, 0, 0.2, 1)' : undefined,
+    } : undefined}
     >
       {/* Header */}
       {isTab ? (
@@ -760,11 +770,13 @@ export function SessionWindow({
                 onClick={() => setShowHistory(!showHistory)}
                 className={`hover:text-gray-200 transition-colors ${showHistory ? 'text-gray-200' : ''}`}
                 title="最近消息"
+                aria-label="Recent messages"
+                aria-expanded={showHistory}
               >
                 <Clock size={18} />
               </button>
               {showHistory && (
-                <div className="absolute right-0 top-full mt-2 w-72 bg-[#1E1814]/95 backdrop-blur-2xl border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50">
+                <div className="absolute right-0 top-full mt-2 w-72 bg-surface/95 backdrop-blur-2xl border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50">
                   <div className="px-3 py-2 border-b border-white/5 text-xs font-medium text-gray-500">最近发送的消息</div>
                   <div className="max-h-64 overflow-y-auto custom-scrollbar">
                     {recentUserMessages.length > 0 ? recentUserMessages.map(msg => (
@@ -799,6 +811,7 @@ export function SessionWindow({
             <button
               className="hover:text-gray-200 transition-colors"
               title="复制 session"
+              aria-label="Copy session"
               onClick={() => onCopySession?.(session.title)}
             >
               <Copy size={18} />
@@ -808,6 +821,7 @@ export function SessionWindow({
                 onClick={() => { if (window.confirm('确定要删除这个 session 吗？')) onDelete(); }}
                 className="hover:text-red-400 transition-colors"
                 title="删除 session"
+                aria-label="Delete session"
               >
                 <Trash2 size={18} />
               </button>
@@ -815,11 +829,12 @@ export function SessionWindow({
           </div>
         </div>
       ) : (
-        <div className={`session-header flex items-center justify-between p-4 px-6 select-none shrink-0 ${fullScreen ? 'border-b border-white/5 bg-black/20' : 'cursor-move bg-[#1E1814]/90'}`} onDoubleClick={onHeaderDoubleClick}>
+        <div className={`session-header flex items-center justify-between p-4 px-6 select-none shrink-0 ${fullScreen ? 'border-b border-white/5 bg-black/20' : 'cursor-move bg-surface/90'}`} onDoubleClick={onHeaderDoubleClick}>
           <div className="flex items-center gap-3">
             {onClose && (
               <button
                 onClick={isStreaming ? handleStop : onClose}
+                aria-label={isStreaming ? 'Stop generation' : 'Close session'}
                 className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
                   isStreaming
                     ? 'bg-red-500/20 hover:bg-red-500/40 text-red-400'
@@ -863,6 +878,7 @@ export function SessionWindow({
                 <button
                   onClick={(e) => { e.stopPropagation(); handleTitleDoubleClick(e); }}
                   onMouseDown={(e) => e.stopPropagation()}
+                  aria-label="Edit title"
                   className="opacity-0 group-hover/title:opacity-100 text-gray-400 hover:text-white transition-opacity"
                 >
                   <Pencil size={12} />
@@ -889,11 +905,13 @@ export function SessionWindow({
                 onMouseDown={(e) => e.stopPropagation()}
                 className={`hover:text-gray-200 transition-colors ${showHistory ? 'text-gray-200' : ''}`}
                 title="最近消息"
+                aria-label="Recent messages"
+                aria-expanded={showHistory}
               >
                 <Clock size={18} />
               </button>
               {showHistory && (
-                <div className="absolute right-0 top-full mt-2 w-72 bg-[#1E1814]/95 backdrop-blur-2xl border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50">
+                <div className="absolute right-0 top-full mt-2 w-72 bg-surface/95 backdrop-blur-2xl border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50">
                   <div className="px-3 py-2 border-b border-white/5 text-xs font-medium text-gray-500">最近发送的消息</div>
                   <div className="max-h-64 overflow-y-auto custom-scrollbar">
                     {recentUserMessages.length > 0 ? recentUserMessages.map(msg => (
@@ -930,6 +948,7 @@ export function SessionWindow({
             <button
               className="hover:text-gray-200 transition-colors"
               title="复制 session"
+              aria-label="Copy session"
               onClick={(e) => { e.stopPropagation(); onCopySession?.(session.title); }}
               onMouseDown={(e) => e.stopPropagation()}
             >
@@ -944,6 +963,7 @@ export function SessionWindow({
                 onMouseDown={(e) => e.stopPropagation()}
                 className="hover:text-red-400 transition-colors"
                 title="删除 session"
+                aria-label="Delete session"
               >
                 <Trash2 size={18} />
               </button>
@@ -986,7 +1006,7 @@ export function SessionWindow({
                       }}
                       className={`msg-content ${
                         msg.role === 'user'
-                          ? 'group/user relative max-w-[85%] bg-white/10 text-gray-200 rounded-[24px] px-5 py-3.5'
+                          ? 'group/user relative max-w-[85%] bg-white/10 text-gray-200 rounded-3xl px-5 py-3.5'
                           : `text-gray-300 w-full${isTab ? ' pl-1' : ''}`
                       } cursor-text select-text`}>
                       {msg.role === 'user' ? (
@@ -1001,6 +1021,7 @@ export function SessionWindow({
                               setCopiedMsgId(msg.id);
                               setTimeout(() => setCopiedMsgId(prev => prev === msg.id ? null : prev), 2000);
                             }}
+                            aria-label="Copy message"
                             className={`absolute -left-9 top-1/2 -translate-y-1/2 p-1.5 rounded-md transition-all cursor-pointer ${
                               copiedMsgId === msg.id
                                 ? 'text-emerald-400 opacity-100'
@@ -1013,7 +1034,6 @@ export function SessionWindow({
                         </>
                       ) : (
                         <>
-                          {isMsgStreaming && !hasVisibleContent(msg) && <ThinkingIndicator />}
                           <MessageRenderer
                             blocks={msg.blocks}
                             fallbackContent={msg.content}
@@ -1031,6 +1051,12 @@ export function SessionWindow({
               })}
             </div>
           )}
+          {isStreaming && (
+            <div className="flex items-center gap-2 py-3 text-gray-400 text-sm">
+              <Loader2 size={14} className="animate-spin" />
+              <span>Running...</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1039,7 +1065,7 @@ export function SessionWindow({
         isTab ? 'p-4 pb-6 w-full max-w-4xl mx-auto'
         : `p-4 pb-6 ${fullScreen ? 'w-full max-w-4xl mx-auto' : 'px-6'}`
       }`}>
-        <div className="bg-[#9A6A45]/30 rounded-[24px] p-2 flex flex-col gap-2 backdrop-blur-xl border border-white/10 shadow-xl focus-within:border-white/20 focus-within:ring-4 focus-within:ring-white/5 transition-all">
+        <div className="bg-white/[0.02] rounded-2xl p-2 flex flex-col gap-2 border border-white/[0.06] focus-within:border-white/10 transition-colors">
           <div className="relative">
             {pickerOpen && filteredSkills.length > 0 && (
               <SkillPicker
@@ -1064,6 +1090,7 @@ export function SessionWindow({
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
               placeholder="随便问..."
+              aria-label="Message input"
               rows={1}
               className={`bg-transparent border-none outline-none px-4 py-3 placeholder-gray-400 w-full resize-none min-h-[44px] max-h-[200px] relative z-10 text-sm ${
                 selectedSkill && inputValue.startsWith(`/${selectedSkill}`)
@@ -1080,20 +1107,18 @@ export function SessionWindow({
           </div>
           <div className="flex items-center justify-between px-2 pb-1">
             <div className="flex items-center gap-2">
-              <button className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
-                isTab ? 'bg-transparent text-gray-300 hover:text-white hover:bg-white/10' : 'bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white'
-              }`}>
+              <button aria-label="Add attachment" className="w-8 h-8 rounded-full flex items-center justify-center transition-colors bg-white/[0.06] text-gray-400 hover:text-white hover:bg-white/10">
                 <Plus size={16} />
               </button>
-              <button className={`rounded-full font-medium transition-colors ${
-                isTab ? 'bg-white/[0.1] px-2 py-0.5 text-[11px] text-gray-300 hover:text-white hover:bg-white/20' : 'bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white px-3 py-1.5 text-xs border border-white/5'
-              }`}>
-                {isTab ? 'Claude' : 'Claude Opus 4.6'}
+              <button className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium text-gray-300 hover:text-white transition-colors">
+                Claude Opus 4.6
+                <ChevronDown size={12} className="text-gray-500" />
               </button>
 
               {(totalAdditions > 0 || totalDeletions > 0) && (
                 <button
                   onClick={onToggleGitPanel}
+                  aria-label="View git changes"
                   className="flex items-center gap-0.5 bg-white/[0.06] border border-white/[0.06] rounded-full px-2.5 py-1 shrink-0 hover:bg-white/10 transition-colors cursor-pointer"
                 >
                   <span className="text-[11px] font-mono font-medium text-green-400/80">+{totalAdditions}</span>
@@ -1110,17 +1135,19 @@ export function SessionWindow({
               )}
             </div>
             {isStreaming ? (
-              <button 
+              <button
                 onClick={handleStop}
+                aria-label="Stop generation"
                 className="w-8 h-8 rounded-full bg-red-500/20 hover:bg-red-500/40 flex items-center justify-center text-red-400 transition-colors"
               >
                 <Square size={14} fill="currentColor" />
               </button>
             ) : (
-              <button 
+              <button
                 onClick={handleSend}
                 disabled={!inputValue.trim()}
-                className="w-8 h-8 rounded-full bg-white/10 text-white hover:bg-white/20 disabled:bg-white/5 disabled:text-gray-500 flex items-center justify-center transition-colors border border-white/5"
+                aria-label="Send message"
+                className="w-8 h-8 rounded-full flex items-center justify-center transition-colors disabled:bg-white/[0.06] disabled:text-gray-500 bg-white text-black hover:bg-gray-200"
               >
                 <ArrowUp size={16} />
               </button>
@@ -1238,7 +1265,7 @@ function ComplexMockContent() {
         </div>
         <p>Here's the main entry point:</p>
 
-        <div className="bg-[#2B2D3A] rounded-xl overflow-hidden border border-white/5">
+        <div className="bg-surface-panel rounded-xl overflow-hidden border border-white/5">
           <div className="flex items-center justify-between px-4 py-2 bg-black/20 border-b border-white/5 text-xs text-gray-400">
             <span>TSX</span>
             <button className="flex items-center gap-1.5 hover:text-gray-200 transition-colors">

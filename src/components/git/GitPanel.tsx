@@ -73,7 +73,7 @@ export function GitPanel({
           animate={{ width: panelWidth, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
           transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-          className="flex-shrink-0 flex flex-col h-full bg-[#1E1814]/90 backdrop-blur-2xl border-l border-white/10 relative overflow-hidden"
+          className="flex-shrink-0 flex flex-col h-full bg-surface/90 backdrop-blur-2xl border-l border-white/10 relative overflow-hidden"
         >
           {/* Left drag handle */}
           <div
@@ -145,7 +145,7 @@ export function GitPanel({
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.15 }}
-                  className="absolute inset-0 bg-[#1E1814]/70 backdrop-blur-sm flex items-center justify-center z-20"
+                  className="absolute inset-0 bg-surface/70 backdrop-blur-sm flex items-center justify-center z-20"
                 >
                   <Loader2 size={20} className="text-amber-400 animate-spin" />
                 </motion.div>

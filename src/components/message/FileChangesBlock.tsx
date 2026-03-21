@@ -30,9 +30,11 @@ export function FileChangesBlock({ title, files }: FileChangesData) {
   return (
     <div className="rounded-xl border border-white/10 bg-white/[0.03] overflow-hidden">
       {/* Header */}
-      <div
-        className="flex items-center gap-2 px-4 py-2.5 border-b border-white/5 bg-white/[0.02] cursor-pointer"
+      <button
+        type="button"
+        className="flex items-center gap-2 px-4 py-2.5 border-b border-white/5 bg-white/[0.02] cursor-pointer w-full text-left"
         onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
       >
         <GitCompareArrows size={14} className="text-violet-400 shrink-0" />
         <span className="text-xs font-medium text-gray-400 flex-1">{title}</span>
@@ -48,7 +50,7 @@ export function FileChangesBlock({ title, files }: FileChangesData) {
           size={16}
           className={`text-gray-500 transition-transform duration-200 ${expanded ? '' : '-rotate-90'}`}
         />
-      </div>
+      </button>
 
       {/* Collapsible file tree */}
       {expanded && (
@@ -75,9 +77,11 @@ function DirGroup({ dir, files }: { dir: string; files: FileChangeItem[] }) {
 
   return (
     <div>
-      <div
-        className="flex items-center gap-2 py-2 cursor-pointer hover:bg-white/[0.02] -mx-1 px-1 rounded-lg transition-colors"
+      <button
+        type="button"
+        className="flex items-center gap-2 py-2 cursor-pointer hover:bg-white/[0.02] -mx-1 px-1 rounded-lg transition-colors w-full text-left"
         onClick={() => setOpen(!open)}
+        aria-expanded={open}
       >
         <ChevronRight
           size={14}
@@ -85,7 +89,7 @@ function DirGroup({ dir, files }: { dir: string; files: FileChangeItem[] }) {
         />
         <Folder size={16} className="text-blue-400 shrink-0" />
         <span className="text-[14px] text-gray-300">{dir}</span>
-      </div>
+      </button>
       {open && files.map(f => <FileRow key={f.path} file={f} indent />)}
     </div>
   );

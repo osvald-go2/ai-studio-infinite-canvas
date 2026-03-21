@@ -62,7 +62,7 @@ export function TabView({
   return (
     <div className="w-full h-full flex">
       {/* Left Sidebar - Session List */}
-      <div className="w-80 flex flex-col bg-[#1A1512CC]">
+      <div className="w-80 flex flex-col bg-surface/80">
         <div className="p-3">
           <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5">
             <Search size={16} className="text-gray-400 shrink-0" />
@@ -83,7 +83,7 @@ export function TabView({
               onClick={() => setActiveSessionId(session.id)}
               className={`w-full text-left rounded-lg transition-all duration-200 group px-4 py-2.5 ${
                 activeSessionId === session.id
-                  ? 'bg-[#3B82F633] border border-[#3B82F64D]'
+                  ? 'bg-blue-500/20 border border-blue-500/30'
                   : 'hover:bg-white/5 border border-transparent'
               }`}
             >
@@ -100,13 +100,15 @@ export function TabView({
                   <div className="relative">
                     <button
                       onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === session.id ? null : session.id); }}
+                      aria-label="Session options"
+                      aria-expanded={menuOpenId === session.id}
                       className="p-0.5 rounded text-gray-500 hover:text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       <MoreHorizontal size={14} />
                     </button>
                     {menuOpenId === session.id && (
                       <div
-                        className="absolute right-0 top-full mt-1 w-36 bg-[#2A2520] border border-white/10 rounded-lg shadow-xl z-50 py-1"
+                        className="absolute right-0 top-full mt-1 w-36 bg-surface-elevated border border-white/10 rounded-lg shadow-xl z-50 py-1"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <button

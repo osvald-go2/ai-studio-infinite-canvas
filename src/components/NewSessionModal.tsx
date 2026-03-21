@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, GitBranch, FolderGit2, ChevronDown, MessageSquare, PenLine, GitFork } from 'lucide-react';
 import { gitService } from '../services/git';
 import type { BranchInfo } from '../types/git';
+import { useFocusTrap } from '../utils/useFocusTrap';
 
 interface NewSessionModalProps {
   isOpen: boolean;
@@ -49,6 +50,7 @@ export function NewSessionModal({ isOpen, onClose, onCreate, projectDir, isGitRe
   const [gitBranch, setGitBranch] = useState('main');
   const [worktree, setWorktree] = useState('default');
   const [initialPrompt, setInitialPrompt] = useState('');
+  const trapRef = useFocusTrap(isOpen, onClose);
 
   // Worktree creation state
   const [useWorktree, setUseWorktree] = useState(false);
@@ -121,30 +123,34 @@ export function NewSessionModal({ isOpen, onClose, onCreate, projectDir, isGitRe
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
-      <div className="bg-[#1E1814]/95 backdrop-blur-2xl border border-white/10 rounded-[24px] w-full max-w-xl shadow-2xl overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4" role="dialog" aria-modal="true" aria-labelledby="new-session-title" ref={trapRef}>
+      <div className="bg-surface/95 backdrop-blur-2xl border border-white/10 rounded-3xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col">
         <div className="flex justify-between items-center px-7 pt-7 pb-2">
-          <h2 className="text-xl font-semibold text-white">New Session</h2>
-          <button onClick={onClose} className="w-9 h-9 rounded-full bg-white/[0.06] hover:bg-white/10 flex items-center justify-center text-gray-500 hover:text-gray-300 transition-colors">
+          <h2 id="new-session-title" className="text-xl font-semibold text-white">New Session</h2>
+          <button onClick={onClose} aria-label="Close dialog" className="w-9 h-9 rounded-full bg-white/[0.06] hover:bg-white/10 flex items-center justify-center text-gray-500 hover:text-gray-300 transition-colors">
             <X size={18} />
           </button>
         </div>
         <form onSubmit={handleSubmit} className="px-7 pb-7 pt-4 space-y-5">
+          {/* [M5] Title — required field */}
           <div className="relative">
             <PenLine size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-blue-400 pointer-events-none" />
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-4 py-3.5 text-white outline-none focus:border-white/15 transition-all placeholder-gray-600 text-[15px]"
+              className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-4 py-3.5 text-white outline-none focus:border-white/15 transition-all placeholder-gray-400 text-[15px]"
               placeholder="Session title..."
+              aria-label="Session title"
+              required
               autoFocus
             />
           </div>
 
-          <div>
-            <label className="block text-[15px] font-medium text-white mb-3">Model</label>
-            <div className="grid grid-cols-3 gap-3">
+          {/* [H1] Model — radiogroup semantics */}
+          <fieldset>
+            <legend className="block text-[15px] font-medium text-white mb-3">Model</legend>
+            <div className="grid grid-cols-3 gap-3" role="radiogroup" aria-label="Model">
               {MODELS.map((m) => {
                 const Icon = m.icon;
                 const isSelected = model === m.id;
@@ -152,6 +158,8 @@ export function NewSessionModal({ isOpen, onClose, onCreate, projectDir, isGitRe
                   <button
                     key={m.id}
                     type="button"
+                    role="radio"
+                    aria-checked={isSelected}
                     onClick={() => setModel(m.id)}
                     className={`flex flex-col items-center justify-center gap-2.5 py-5 px-3 rounded-xl border transition-all ${
                       isSelected
@@ -165,13 +173,16 @@ export function NewSessionModal({ isOpen, onClose, onCreate, projectDir, isGitRe
                 );
               })}
             </div>
-          </div>
+          </fieldset>
 
-          {/* Worktree Toggle — only if git repo is active */}
+          {/* [C1] Worktree Toggle — role="switch" with aria-checked */}
           {isGitRepo && (
             <div className="flex items-center gap-3">
               <button
                 type="button"
+                role="switch"
+                aria-checked={useWorktree}
+                aria-label="Create in Worktree"
                 onClick={() => setUseWorktree((v) => !v)}
                 className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
                   useWorktree ? 'bg-amber-500' : 'bg-white/10'
@@ -190,7 +201,7 @@ export function NewSessionModal({ isOpen, onClose, onCreate, projectDir, isGitRe
             </div>
           )}
 
-          {/* Worktree branch fields */}
+          {/* [H2] Worktree branch fields — aria-labels on all controls */}
           {useWorktree && isGitRepo ? (
             <div className="grid grid-cols-2 gap-3">
               <div className="relative">
@@ -199,12 +210,13 @@ export function NewSessionModal({ isOpen, onClose, onCreate, projectDir, isGitRe
                 <select
                   value={baseBranch}
                   onChange={(e) => setBaseBranch(e.target.value)}
+                  aria-label="Base branch"
                   className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-9 py-3.5 text-white outline-none focus:border-white/15 transition-all text-[15px] appearance-none cursor-pointer"
                 >
                   {branches.length > 0 ? branches.map((b) => (
-                    <option key={b.name} value={b.name}>{b.name}</option>
+                    <option className="bg-gray-900 text-white" key={b.name} value={b.name}>{b.name}</option>
                   )) : (
-                    <option value="main">main</option>
+                    <option className="bg-gray-900 text-white" value="main">main</option>
                   )}
                 </select>
               </div>
@@ -214,7 +226,8 @@ export function NewSessionModal({ isOpen, onClose, onCreate, projectDir, isGitRe
                   type="text"
                   value={newBranch}
                   onChange={(e) => setNewBranch(e.target.value)}
-                  className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-4 py-3.5 text-white outline-none focus:border-white/15 transition-all text-[15px] placeholder-gray-600"
+                  aria-label="New branch name"
+                  className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-4 py-3.5 text-white outline-none focus:border-white/15 transition-all text-[15px] placeholder-gray-400"
                   placeholder="New branch name..."
                 />
               </div>
@@ -227,12 +240,13 @@ export function NewSessionModal({ isOpen, onClose, onCreate, projectDir, isGitRe
                 <select
                   value={gitBranch}
                   onChange={(e) => setGitBranch(e.target.value)}
+                  aria-label="Git branch"
                   className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-9 py-3.5 text-white outline-none focus:border-white/15 transition-all text-[15px] appearance-none cursor-pointer"
                 >
-                  <option value="main">main</option>
-                  <option value="develop">develop</option>
-                  <option value="feature">feature</option>
-                  <option value="staging">staging</option>
+                  <option className="bg-gray-900 text-white" value="main">main</option>
+                  <option className="bg-gray-900 text-white" value="develop">develop</option>
+                  <option className="bg-gray-900 text-white" value="feature">feature</option>
+                  <option className="bg-gray-900 text-white" value="staging">staging</option>
                 </select>
               </div>
               <div className="relative">
@@ -241,27 +255,31 @@ export function NewSessionModal({ isOpen, onClose, onCreate, projectDir, isGitRe
                   type="text"
                   value={worktree}
                   onChange={(e) => setWorktree(e.target.value)}
-                  className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-4 py-3.5 text-white outline-none focus:border-white/15 transition-all text-[15px] placeholder-gray-600"
+                  aria-label="Worktree path"
+                  className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-4 py-3.5 text-white outline-none focus:border-white/15 transition-all text-[15px] placeholder-gray-400"
                   placeholder="Worktree path..."
                 />
               </div>
             </div>
           )}
 
+          {/* [M2] Error — role="alert" for screen reader announcement */}
           {worktreeError && (
-            <div className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-2">
+            <div role="alert" className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-2">
               {worktreeError}
             </div>
           )}
 
+          {/* [H2] Initial Prompt — label linked via htmlFor + id */}
           <div>
-            <label className="block text-[15px] font-medium text-white mb-3">Initial Prompt</label>
+            <label htmlFor="initial-prompt" className="block text-[15px] font-medium text-white mb-3">Initial Prompt</label>
             <div className="relative">
               <MessageSquare size={16} className="absolute left-3.5 top-4 text-purple-400 pointer-events-none" />
               <textarea
+                id="initial-prompt"
                 value={initialPrompt}
                 onChange={(e) => setInitialPrompt(e.target.value)}
-                className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-4 py-3.5 text-white outline-none focus:border-white/15 transition-all resize-none h-28 text-[15px] placeholder-gray-600 custom-scrollbar"
+                className="w-full bg-white/[0.04] border border-white/[0.06] rounded-xl pl-10 pr-4 py-3.5 text-white outline-none focus:border-white/15 transition-all resize-none h-28 text-[15px] placeholder-gray-400 custom-scrollbar"
                 placeholder="Enter the initial prompt to send to the session..."
               />
             </div>
