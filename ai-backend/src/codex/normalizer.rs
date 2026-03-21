@@ -34,6 +34,8 @@ pub async fn process_codex_stream(
     // Track items that received an ItemStarted event, keyed by item id.
     // Codex often skips ItemStarted and only sends ItemCompleted.
     let mut started_items: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Map item id → block_index so item.updated can send deltas to the right block.
+    let mut item_block_index: HashMap<String, usize> = HashMap::new();
 
     while let Some(event) = event_rx.recv().await {
         match event {
@@ -62,6 +64,7 @@ pub async fn process_codex_stream(
                 if let Some(block) = item_started_block(&item) {
                     if let Some(id) = &item.id {
                         started_items.insert(id.clone());
+                        item_block_index.insert(id.clone(), block_index);
                     }
                     let _ = event_tx.send(Event::new(
                         "block.start",
@@ -75,6 +78,25 @@ pub async fn process_codex_stream(
                     block_index += 1;
                 }
                 // reasoning items are silently dropped (item_started_block returns None)
+            }
+
+            // ── item.updated (progressive updates, e.g., todo_list progress) ─
+            CodexEvent::ItemUpdated { item } => {
+                if let Some(id) = &item.id {
+                    if let Some(&bi) = item_block_index.get(id) {
+                        // Send updated block content as a delta
+                        let updated_block = build_todolist_block(&item);
+                        let _ = event_tx.send(Event::new(
+                            "block.delta",
+                            json!({
+                                "session_id": session_id,
+                                "block_index": bi,
+                                "delta": updated_block,
+                                "agent": "codex",
+                            }),
+                        ));
+                    }
+                }
             }
 
             // ── item.completed ─────────────────────────────────────────
@@ -92,6 +114,9 @@ pub async fn process_codex_stream(
 
                 if !already_started {
                     if let Some(block) = item_started_block(&item) {
+                        if let Some(id) = &item.id {
+                            item_block_index.insert(id.clone(), block_index);
+                        }
                         let _ = event_tx.send(Event::new(
                             "block.start",
                             json!({
@@ -134,6 +159,7 @@ pub async fn process_codex_stream(
                         }),
                     ));
                 }
+
             }
 
             // ── turn.completed ─────────────────────────────────────────
@@ -195,15 +221,42 @@ pub async fn process_codex_stream(
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+/// Build a todolist block from Codex `todo_list` items.
+fn build_todolist_block(item: &CodexItem) -> serde_json::Value {
+    let items: Vec<serde_json::Value> = item
+        .items
+        .as_ref()
+        .map(|todos| {
+            todos
+                .iter()
+                .enumerate()
+                .map(|(i, t)| {
+                    json!({
+                        "id": format!("todo_{}", i + 1),
+                        "label": t.text,
+                        "status": if t.completed { "done" } else { "pending" },
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    json!({
+        "type": "todolist",
+        "items": items,
+    })
+}
+
 /// Map an `item.started` event to a frontend block, or `None` to drop it.
 fn item_started_block(item: &CodexItem) -> Option<serde_json::Value> {
     let item_type = item.item_type.as_deref().unwrap_or("");
 
     match item_type {
         // Agent text message
+        // Always start with empty content — the actual text arrives via
+        // item_completed_content delta, avoiding duplication.
         "agent_message" | "message" => Some(json!({
             "type": "text",
-            "content": item.text.as_deref().unwrap_or(""),
+            "content": "",
         })),
 
         // Shell command execution
@@ -219,7 +272,11 @@ fn item_started_block(item: &CodexItem) -> Option<serde_json::Value> {
 
         // File edits
         "file_change" | "file_edit" => {
-            let filename = item.filename.as_deref().unwrap_or("file");
+            let filename = item.changes.as_ref()
+                .and_then(|c| c.first())
+                .map(|c| c.path.as_str())
+                .or(item.filename.as_deref())
+                .unwrap_or("file");
             Some(json!({
                 "type": "tool_call",
                 "tool": "Edit",
@@ -238,6 +295,9 @@ fn item_started_block(item: &CodexItem) -> Option<serde_json::Value> {
                 "status": "running",
             }))
         }
+
+        // Todo list
+        "todo_list" => Some(build_todolist_block(item)),
 
         // Reasoning / thinking — drop silently
         "reasoning" => None,
@@ -258,7 +318,9 @@ fn item_completed_content(item: &CodexItem) -> (Option<serde_json::Value>, &'sta
         }
 
         "command_execution" | "function_call_output" => {
-            let output = item.output.as_deref().unwrap_or("");
+            let output = item.aggregated_output.as_deref()
+                .or(item.output.as_deref())
+                .unwrap_or("");
             let status = match item.exit_code {
                 Some(0) | None => "done",
                 Some(_) => "error",
@@ -269,15 +331,19 @@ fn item_completed_content(item: &CodexItem) -> (Option<serde_json::Value>, &'sta
         "file_change" | "file_edit" => {
             let status = item.status.as_deref().unwrap_or("done");
             let s = if status == "completed" || status == "success" { "done" } else { status };
-            // Borrow checker: return a 'static str for the common cases
             let static_status = match s {
                 "done" => "done",
                 "error" => "error",
                 _ => "done",
             };
+            let filename = item.changes.as_ref()
+                .and_then(|c| c.first())
+                .map(|c| c.path.as_str())
+                .or(item.filename.as_deref())
+                .unwrap_or("");
             (
                 Some(json!({
-                    "filename": item.filename.as_deref().unwrap_or(""),
+                    "filename": filename,
                     "content": item.content,
                 })),
                 static_status,
@@ -291,6 +357,12 @@ fn item_completed_content(item: &CodexItem) -> (Option<serde_json::Value>, &'sta
             )
         }
 
+        // Todo list completed — emit full todolist as delta to replace the block content
+        "todo_list" => {
+            let block = build_todolist_block(item);
+            (Some(block), "done")
+        }
+
         // Reasoning completed — still dropped
         "reasoning" => (None, "done"),
 
@@ -301,7 +373,7 @@ fn item_completed_content(item: &CodexItem) -> (Option<serde_json::Value>, &'sta
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codex::types::{CodexEvent, CodexItem, CodexUsage};
+    use crate::codex::types::{CodexChange, CodexEvent, CodexItem, CodexTodoItem, CodexUsage};
     use tokio::sync::mpsc;
 
     /// Helper: run the normalizer on a sequence of events and collect the output.
@@ -359,8 +431,11 @@ mod tests {
                     text: Some("Hello!".into()),
                     command: None,
                     output: None,
+                    aggregated_output: None,
                     exit_code: None,
                     filename: None,
+                    changes: None,
+                    items: None,
                     content: None,
                 },
             },
@@ -372,8 +447,11 @@ mod tests {
                     text: Some("Hello!".into()),
                     command: None,
                     output: None,
+                    aggregated_output: None,
                     exit_code: None,
                     filename: None,
+                    changes: None,
+                    items: None,
                     content: None,
                 },
             },
@@ -385,6 +463,7 @@ mod tests {
         let start = event_json(&out[0]);
         assert_eq!(start["event"], "block.start");
         assert_eq!(start["data"]["block"]["type"], "text");
+        assert_eq!(start["data"]["block"]["content"], ""); // empty — delta fills it
 
         let delta = event_json(&out[1]);
         assert_eq!(delta["event"], "block.delta");
@@ -409,8 +488,11 @@ mod tests {
                     text: Some("Hi!".into()),
                     command: None,
                     output: None,
+                    aggregated_output: None,
                     exit_code: None,
                     filename: None,
+                    changes: None,
+                    items: None,
                     content: None,
                 },
             },
@@ -425,6 +507,7 @@ mod tests {
         let start = event_json(&out[1]);
         assert_eq!(start["event"], "block.start");
         assert_eq!(start["data"]["block"]["type"], "text");
+        assert_eq!(start["data"]["block"]["content"], ""); // empty — delta fills it
 
         let delta = event_json(&out[2]);
         assert_eq!(delta["event"], "block.delta");
@@ -433,6 +516,53 @@ mod tests {
         let stop = event_json(&out[3]);
         assert_eq!(stop["event"], "block.stop");
         assert_eq!(stop["data"]["status"], "done");
+    }
+
+    #[tokio::test]
+    async fn test_agent_message_no_text_duplication() {
+        // Regression: block.start used to include item.text, and then
+        // item_completed_content sent the same text as a delta, causing the
+        // frontend to display the text twice.  After the fix, block.start
+        // always carries empty content so the text appears only once (via delta).
+        let events = vec![
+            // Codex skips item.started — only item.completed arrives (common path)
+            CodexEvent::ItemCompleted {
+                item: CodexItem {
+                    id: Some("item_dup".into()),
+                    item_type: Some("agent_message".into()),
+                    status: None,
+                    text: Some("Hello World".into()),
+                    command: None,
+                    output: None,
+                    aggregated_output: None,
+                    exit_code: None,
+                    filename: None,
+                    changes: None,
+                    items: None,
+                    content: None,
+                },
+            },
+            CodexEvent::TurnCompleted { usage: None },
+        ];
+        let out = run_normalizer(events).await;
+
+        // Synthesized block.start must have empty content
+        let start = event_json(&out[0]);
+        assert_eq!(start["event"], "block.start");
+        assert_eq!(start["data"]["block"]["content"], "");
+
+        // Delta carries the text exactly once
+        let delta = event_json(&out[1]);
+        assert_eq!(delta["event"], "block.delta");
+        assert_eq!(delta["data"]["delta"]["content"], "Hello World");
+
+        // Simulate what the frontend does: start content + delta content
+        let final_text = format!(
+            "{}{}",
+            start["data"]["block"]["content"].as_str().unwrap(),
+            delta["data"]["delta"]["content"].as_str().unwrap(),
+        );
+        assert_eq!(final_text, "Hello World"); // NOT "Hello WorldHello World"
     }
 
     #[tokio::test]
@@ -446,8 +576,11 @@ mod tests {
                     text: None,
                     command: Some("ls -la".into()),
                     output: None,
+                    aggregated_output: None,
                     exit_code: None,
                     filename: None,
+                    changes: None,
+                    items: None,
                     content: None,
                 },
             },
@@ -459,8 +592,11 @@ mod tests {
                     text: None,
                     command: Some("ls -la".into()),
                     output: Some("total 42\n".into()),
+                    aggregated_output: None,
                     exit_code: Some(0),
                     filename: None,
+                    changes: None,
+                    items: None,
                     content: None,
                 },
             },
@@ -483,8 +619,11 @@ mod tests {
                     text: None,
                     command: None,
                     output: None,
+                    aggregated_output: None,
                     exit_code: None,
                     filename: Some("src/main.rs".into()),
+                    changes: None,
+                    items: None,
                     content: None,
                 },
             },
@@ -496,8 +635,11 @@ mod tests {
                     text: None,
                     command: None,
                     output: None,
+                    aggregated_output: None,
                     exit_code: None,
                     filename: Some("src/main.rs".into()),
+                    changes: None,
+                    items: None,
                     content: None,
                 },
             },
@@ -520,8 +662,11 @@ mod tests {
                     text: Some("thinking...".into()),
                     command: None,
                     output: None,
+                    aggregated_output: None,
                     exit_code: None,
                     filename: None,
+                    changes: None,
+                    items: None,
                     content: None,
                 },
             },
@@ -533,8 +678,11 @@ mod tests {
                     text: Some("done thinking".into()),
                     command: None,
                     output: None,
+                    aggregated_output: None,
                     exit_code: None,
                     filename: None,
+                    changes: None,
+                    items: None,
                     content: None,
                 },
             },
@@ -574,8 +722,11 @@ mod tests {
                 text: Some("partial".into()),
                 command: None,
                 output: None,
+                aggregated_output: None,
                 exit_code: None,
                 filename: None,
+                changes: None,
+                items: None,
                 content: None,
             },
         }];
@@ -618,5 +769,287 @@ mod tests {
         process_codex_stream("s1", evt_rx, stderr_rx, out_tx, tid_slot, sessions).await;
 
         assert_eq!(*slot.lock().unwrap(), Some("thread_xyz".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_command_execution_with_aggregated_output() {
+        // Real Codex v0.87.0 format: uses aggregated_output instead of output
+        let events = vec![
+            CodexEvent::ItemCompleted {
+                item: CodexItem {
+                    id: Some("item_2".into()),
+                    item_type: Some("command_execution".into()),
+                    status: Some("completed".into()),
+                    text: None,
+                    command: Some("bash -lc ls".into()),
+                    output: None,
+                    aggregated_output: Some("file1\nfile2\n".into()),
+                    exit_code: Some(0),
+                    filename: None,
+                    changes: None,
+                    items: None,
+                    content: None,
+                },
+            },
+            CodexEvent::TurnCompleted { usage: None },
+        ];
+        let out = run_normalizer(events).await;
+
+        // block.start (synthesized), block.delta, block.stop, message.complete
+        let start = event_json(&out[0]);
+        assert_eq!(start["data"]["block"]["tool"], "Bash");
+        assert_eq!(start["data"]["block"]["args"], "$ bash -lc ls");
+
+        let delta = event_json(&out[1]);
+        assert_eq!(delta["data"]["delta"]["output"], "file1\nfile2\n");
+        assert_eq!(delta["data"]["delta"]["exit_code"], 0);
+
+        let stop = event_json(&out[2]);
+        assert_eq!(stop["data"]["status"], "done");
+    }
+
+    #[tokio::test]
+    async fn test_aggregated_output_preferred_over_output() {
+        // When both fields are present, aggregated_output wins
+        let events = vec![
+            CodexEvent::ItemCompleted {
+                item: CodexItem {
+                    id: None,
+                    item_type: Some("command_execution".into()),
+                    status: None,
+                    text: None,
+                    command: Some("echo hi".into()),
+                    output: Some("old".into()),
+                    aggregated_output: Some("new".into()),
+                    exit_code: Some(0),
+                    filename: None,
+                    changes: None,
+                    items: None,
+                    content: None,
+                },
+            },
+            CodexEvent::TurnCompleted { usage: None },
+        ];
+        let out = run_normalizer(events).await;
+        let delta = event_json(&out[1]);
+        assert_eq!(delta["data"]["delta"]["output"], "new");
+    }
+
+    #[tokio::test]
+    async fn test_file_change_with_changes_array() {
+        // Real Codex v0.87.0 format: uses changes array instead of filename
+        let events = vec![
+            CodexEvent::ItemCompleted {
+                item: CodexItem {
+                    id: Some("item_4".into()),
+                    item_type: Some("file_change".into()),
+                    status: Some("completed".into()),
+                    text: None,
+                    command: None,
+                    output: None,
+                    aggregated_output: None,
+                    exit_code: None,
+                    filename: None,
+                    changes: Some(vec![CodexChange {
+                        path: "/full/path/to/file.ts".into(),
+                        kind: "update".into(),
+                    }]),
+                    items: None,
+                    content: None,
+                },
+            },
+            CodexEvent::TurnCompleted { usage: None },
+        ];
+        let out = run_normalizer(events).await;
+
+        let start = event_json(&out[0]);
+        assert_eq!(start["data"]["block"]["tool"], "Edit");
+        assert_eq!(start["data"]["block"]["args"], "/full/path/to/file.ts");
+
+        let delta = event_json(&out[1]);
+        assert_eq!(delta["data"]["delta"]["filename"], "/full/path/to/file.ts");
+
+        let stop = event_json(&out[2]);
+        assert_eq!(stop["data"]["status"], "done");
+    }
+
+    #[tokio::test]
+    async fn test_file_change_changes_preferred_over_filename() {
+        // When both changes and filename are present, changes wins
+        let events = vec![
+            CodexEvent::ItemCompleted {
+                item: CodexItem {
+                    id: None,
+                    item_type: Some("file_change".into()),
+                    status: Some("completed".into()),
+                    text: None,
+                    command: None,
+                    output: None,
+                    aggregated_output: None,
+                    exit_code: None,
+                    filename: Some("old.rs".into()),
+                    changes: Some(vec![CodexChange {
+                        path: "/new/path.rs".into(),
+                        kind: "create".into(),
+                    }]),
+                    items: None,
+                    content: None,
+                },
+            },
+            CodexEvent::TurnCompleted { usage: None },
+        ];
+        let out = run_normalizer(events).await;
+        let start = event_json(&out[0]);
+        assert_eq!(start["data"]["block"]["args"], "/new/path.rs");
+    }
+
+    #[tokio::test]
+    async fn test_todo_list_started_produces_todolist_block() {
+        // Real Codex format: item.started with type=todo_list + items array
+        let events = vec![
+            CodexEvent::ItemStarted {
+                item: CodexItem {
+                    id: Some("item_3".into()),
+                    item_type: Some("todo_list".into()),
+                    status: None,
+                    text: None,
+                    command: None,
+                    output: None,
+                    aggregated_output: None,
+                    exit_code: None,
+                    filename: None,
+                    changes: None,
+                    items: Some(vec![
+                        CodexTodoItem { text: "Task 1".into(), completed: false },
+                        CodexTodoItem { text: "Task 2".into(), completed: false },
+                    ]),
+                    content: None,
+                },
+            },
+            CodexEvent::TurnCompleted { usage: None },
+        ];
+        let out = run_normalizer(events).await;
+
+        let start = event_json(&out[0]);
+        assert_eq!(start["event"], "block.start");
+        assert_eq!(start["data"]["block"]["type"], "todolist");
+        assert_eq!(start["data"]["block"]["items"][0]["label"], "Task 1");
+        assert_eq!(start["data"]["block"]["items"][0]["status"], "pending");
+        assert_eq!(start["data"]["block"]["items"][1]["label"], "Task 2");
+        assert_eq!(start["data"]["block"]["items"][1]["status"], "pending");
+    }
+
+    #[tokio::test]
+    async fn test_todo_list_updated_sends_delta() {
+        // Codex sends item.updated to progressively mark tasks done
+        let events = vec![
+            CodexEvent::ItemStarted {
+                item: CodexItem {
+                    id: Some("item_3".into()),
+                    item_type: Some("todo_list".into()),
+                    status: None,
+                    text: None,
+                    command: None,
+                    output: None,
+                    aggregated_output: None,
+                    exit_code: None,
+                    filename: None,
+                    changes: None,
+                    items: Some(vec![
+                        CodexTodoItem { text: "Task 1".into(), completed: false },
+                        CodexTodoItem { text: "Task 2".into(), completed: false },
+                    ]),
+                    content: None,
+                },
+            },
+            CodexEvent::ItemUpdated {
+                item: CodexItem {
+                    id: Some("item_3".into()),
+                    item_type: Some("todo_list".into()),
+                    status: None,
+                    text: None,
+                    command: None,
+                    output: None,
+                    aggregated_output: None,
+                    exit_code: None,
+                    filename: None,
+                    changes: None,
+                    items: Some(vec![
+                        CodexTodoItem { text: "Task 1".into(), completed: true },
+                        CodexTodoItem { text: "Task 2".into(), completed: false },
+                    ]),
+                    content: None,
+                },
+            },
+            CodexEvent::TurnCompleted { usage: None },
+        ];
+        let out = run_normalizer(events).await;
+
+        // block.start (todolist), block.delta (updated items), message.complete
+        let start = event_json(&out[0]);
+        assert_eq!(start["data"]["block"]["type"], "todolist");
+        assert_eq!(start["data"]["block"]["items"][0]["status"], "pending");
+
+        let delta = event_json(&out[1]);
+        assert_eq!(delta["event"], "block.delta");
+        assert_eq!(delta["data"]["delta"]["items"][0]["label"], "Task 1");
+        assert_eq!(delta["data"]["delta"]["items"][0]["status"], "done");
+        assert_eq!(delta["data"]["delta"]["items"][1]["status"], "pending");
+    }
+
+    #[tokio::test]
+    async fn test_todo_list_completed_emits_stop() {
+        // Full lifecycle: started → updated → completed
+        let events = vec![
+            CodexEvent::ItemStarted {
+                item: CodexItem {
+                    id: Some("item_3".into()),
+                    item_type: Some("todo_list".into()),
+                    status: None,
+                    text: None,
+                    command: None,
+                    output: None,
+                    aggregated_output: None,
+                    exit_code: None,
+                    filename: None,
+                    changes: None,
+                    items: Some(vec![
+                        CodexTodoItem { text: "Task 1".into(), completed: false },
+                    ]),
+                    content: None,
+                },
+            },
+            CodexEvent::ItemCompleted {
+                item: CodexItem {
+                    id: Some("item_3".into()),
+                    item_type: Some("todo_list".into()),
+                    status: None,
+                    text: None,
+                    command: None,
+                    output: None,
+                    aggregated_output: None,
+                    exit_code: None,
+                    filename: None,
+                    changes: None,
+                    items: Some(vec![
+                        CodexTodoItem { text: "Task 1".into(), completed: true },
+                    ]),
+                    content: None,
+                },
+            },
+            CodexEvent::TurnCompleted { usage: None },
+        ];
+        let out = run_normalizer(events).await;
+
+        // block.start, block.delta (final items), block.stop, message.complete
+        let start = event_json(&out[0]);
+        assert_eq!(start["data"]["block"]["type"], "todolist");
+
+        let delta = event_json(&out[1]);
+        assert_eq!(delta["data"]["delta"]["items"][0]["status"], "done");
+
+        let stop = event_json(&out[2]);
+        assert_eq!(stop["event"], "block.stop");
+        assert_eq!(stop["data"]["status"], "done");
     }
 }
