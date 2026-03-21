@@ -17,9 +17,15 @@ impl CodexProcess {
         working_dir: &str,
         prompt: &str,
         resume_thread_id: Option<&str>,
+        model: Option<&str>,
     ) -> Result<(Self, mpsc::UnboundedReceiver<CodexEvent>, mpsc::UnboundedReceiver<String>), String>
     {
         let mut cmd = Command::new("codex");
+
+        // -m must come before exec subcommand
+        if let Some(m) = model {
+            cmd.args(["-m", m]);
+        }
 
         if let Some(thread_id) = resume_thread_id {
             // codex exec resume <SESSION_ID> <PROMPT> --json --full-auto

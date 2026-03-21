@@ -108,6 +108,22 @@ pub async fn handle_request(
             }
         }
 
+        "session.switch_model" => {
+            let session_id = req.params.get("session_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let new_model = req.params.get("model")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if session_id.is_empty() || new_model.is_empty() {
+                return ErrorResponse::new(req.id, 1002, "session_id and model are required".into());
+            }
+            match session_manager.switch_model(session_id, new_model.to_string()) {
+                Ok(()) => Response::ok(req.id, json!({"ok": true})),
+                Err(e) => ErrorResponse::new(req.id, e.code(), e.to_string()),
+            }
+        }
+
         // ── git commands ────────────────────────────────────────────────────
 
         "git.check_repo" => {
