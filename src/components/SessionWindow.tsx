@@ -9,7 +9,7 @@ import { getStatusDotClass } from '../utils/statusColors';
 import { SkillPicker } from './SkillPicker';
 import { scanSkills } from '../services/skillScanner';
 import { useGit } from '../contexts/GitProvider';
-import { getAgentType } from '../models';
+import { getAgentType, getModelDisplayName, getSiblingVariants } from '../models';
 
 function isElectron(): boolean {
   return typeof window !== 'undefined' && window.aiBackend !== undefined;
@@ -56,6 +56,8 @@ export function SessionWindow({
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [showModelPicker, setShowModelPicker] = useState(false);
+  const modelPickerRef = useRef<HTMLDivElement>(null);
 
   const { info, changes } = useGit();
   const [worktreeAdditions, setWorktreeAdditions] = useState(0);
@@ -117,6 +119,17 @@ export function SessionWindow({
     document.addEventListener('mousedown', handleClickOutside, true);
     return () => document.removeEventListener('mousedown', handleClickOutside, true);
   }, [showHistory]);
+
+  useEffect(() => {
+    if (!showModelPicker) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modelPickerRef.current && !modelPickerRef.current.contains(e.target as Node)) {
+        setShowModelPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside, true);
+    return () => document.removeEventListener('mousedown', handleClickOutside, true);
+  }, [showModelPicker]);
 
   const formatRelativeTime = (ts?: number) => {
     if (!ts) return '';
@@ -716,6 +729,34 @@ export function SessionWindow({
     setIsEditingTitle(false);
   };
 
+  const handleSwitchModel = async (newModelId: string) => {
+    if (newModelId === session.model) return;
+    setShowModelPicker(false);
+
+    if (backendSessionIdRef.current) {
+      try {
+        await backend.switchModel(backendSessionIdRef.current, newModelId);
+      } catch (e) {
+        console.warn('[model switch error]', e);
+      }
+    }
+
+    const systemMsg: Message = {
+      id: Date.now().toString(),
+      role: 'system',
+      content: `模型已切换为 ${getModelDisplayName(newModelId)}`,
+      timestamp: Date.now(),
+    };
+
+    const updated = {
+      ...sessionRef.current,
+      model: newModelId,
+      messages: [...sessionRef.current.messages, systemMsg],
+    };
+    sessionRef.current = updated;
+    onUpdate(updated);
+  };
+
   const handleTitleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     setEditTitle(session.title);
@@ -884,6 +925,45 @@ export function SessionWindow({
                 >
                   <Pencil size={12} />
                 </button>
+              </div>
+            )}
+            {/* Model variant switcher */}
+            {getSiblingVariants(session.model).length > 1 && (
+              <div className="relative shrink-0" ref={modelPickerRef}>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setShowModelPicker(!showModelPicker); }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  disabled={isStreaming}
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium border transition-all ${
+                    isStreaming
+                      ? 'opacity-40 cursor-not-allowed bg-white/[0.03] border-white/[0.06] text-gray-500'
+                      : 'bg-white/[0.06] border-white/[0.08] text-gray-300 hover:bg-white/[0.1] hover:text-white'
+                  }`}
+                  title={isStreaming ? '流式响应中无法切换模型' : '切换模型'}
+                >
+                  {getModelDisplayName(session.model)}
+                  <ChevronDown size={10} />
+                </button>
+                {showModelPicker && (
+                  <div className="absolute top-full left-0 mt-1 z-50 bg-gray-900 border border-white/10 rounded-lg shadow-xl py-1 min-w-[140px]">
+                    {getSiblingVariants(session.model).map((v) => (
+                      <button
+                        key={v.id}
+                        onClick={(e) => { e.stopPropagation(); handleSwitchModel(v.id); }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
+                          v.id === session.model
+                            ? 'text-white bg-white/[0.08]'
+                            : 'text-gray-400 hover:text-white hover:bg-white/[0.06]'
+                        }`}
+                      >
+                        {v.name}
+                        {v.id === session.model && <Check size={10} className="inline ml-2" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             {(session.gitBranch || info.branch) && (
