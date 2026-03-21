@@ -26,6 +26,8 @@ export function TopBar({
   onToggleGitPanel,
   showTerminal,
   onToggleTerminal,
+  showIsland,
+  onToggleIsland,
   onOpenDirectory,
   projectDir,
   currentProject,
@@ -43,6 +45,8 @@ export function TopBar({
   onToggleGitPanel?: () => void,
   showTerminal?: boolean,
   onToggleTerminal?: () => void,
+  showIsland?: boolean,
+  onToggleIsland?: () => void,
   onOpenDirectory?: () => void,
   projectDir?: string | null,
   currentProject?: DbProject | null,
@@ -259,6 +263,23 @@ export function TopBar({
           )}
         </div>
 
+        {onToggleIsland && (
+          <button
+            onClick={onToggleIsland}
+            title="Toggle Island"
+            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+              showIsland
+                ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
+                : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-200'
+            }`}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="3" width="20" height="4" rx="2"/>
+              <rect x="6" y="3" width="12" height="8" rx="2"/>
+            </svg>
+          </button>
+        )}
         {onToggleTerminal && (
           <button
             onClick={onToggleTerminal}

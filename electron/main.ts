@@ -6,8 +6,11 @@ import { execSync } from 'child_process';
 import Store from 'electron-store';
 import * as pty from 'node-pty';
 import { SidecarManager } from './sidecar';
+import { startIslandServer, stopIslandServer } from './islandServer';
+import { destroyChatPopup, hideChatPopup } from './chatPopupManager';
+import { spawnIsland, killIsland, isIslandRunning } from './islandManager';
 
-const store = new Store<{ anthropicApiKey?: string; lastProjectDir?: string }>();
+const store = new Store<{ anthropicApiKey?: string; lastProjectDir?: string; islandEnabled?: boolean }>();
 
 let mainWindow: BrowserWindow | null = null;
 let sidecar: SidecarManager | null = null;
@@ -58,6 +61,7 @@ function createWindow(): void {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+    destroyChatPopup();
   });
 }
 
@@ -93,16 +97,20 @@ function startSidecar(): void {
   sidecar.spawn(getSidecarEnv());
 
   sidecar.on('event', (eventName: string, data: any) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('sidecar:event', eventName, data);
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('sidecar:event', eventName, data);
+      }
     }
   });
 
   sidecar.on('crashed', (code: number | null) => {
     if (isQuitting) return;
     console.log(`[main] sidecar crashed with code ${code}, restarting...`);
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('sidecar:event', 'sidecar.restarted', {});
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('sidecar:event', 'sidecar.restarted', {});
+      }
     }
     setTimeout(() => {
       if (sidecar && !isQuitting) {
@@ -167,6 +175,45 @@ ipcMain.on('window:dragging', (_, screenX: number, screenY: number) => {
   mainWindow.setPosition(dragStartWin.x + dx, dragStartWin.y + dy);
 });
 
+// ── Chat Popup IPC handlers ──
+
+ipcMain.handle('chat-popup:close', () => {
+  hideChatPopup();
+});
+
+ipcMain.handle('chat-popup:get-session', async (_e, { sessionId }: { sessionId: string }) => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    throw new Error('Main window not available');
+  }
+  const requestId = `${sessionId}-${Date.now()}`;
+  mainWindow.webContents.send('chat-popup:request-session', { sessionId, requestId });
+
+  const responseChannel = `chat-popup:session-response:${requestId}`;
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      ipcMain.removeAllListeners(responseChannel);
+      reject(new Error('Session data request timed out'));
+    }, 5000);
+
+    ipcMain.once(responseChannel, (_e, data) => {
+      clearTimeout(timeout);
+      resolve(data);
+    });
+  });
+});
+
+ipcMain.on('chat-popup:sync-metadata', (_e, metadata: any) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('chat-popup:metadata-updated', metadata);
+  }
+});
+
+ipcMain.on('chat-popup:sync-messages', (_e, payload: any) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('chat-popup:messages-updated', payload);
+  }
+});
+
 ipcMain.handle('get-working-dir', () => {
   return process.cwd();
 });
@@ -183,6 +230,21 @@ ipcMain.handle('dialog:openDirectory', async () => {
 
 ipcMain.handle('config:getLastProjectDir', () => {
   return store.get('lastProjectDir', null);
+});
+
+// ── Island Toggle IPC ──
+
+ipcMain.handle('island:toggle', (_, enabled: boolean) => {
+  store.set('islandEnabled', enabled);
+  if (enabled) {
+    spawnIsland();
+  } else {
+    killIsland();
+  }
+});
+
+ipcMain.handle('island:get-status', () => {
+  return isIslandRunning();
 });
 
 ipcMain.handle('scan-skills', async (_, platform: string, projectDir: string) => {
@@ -377,6 +439,10 @@ app.whenReady().then(() => {
   }
   startSidecar();
   createWindow();
+  startIslandServer(mainWindow!);
+  if (store.get('islandEnabled')) {
+    spawnIsland();
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -386,6 +452,7 @@ app.whenReady().then(() => {
 });
 
 app.on('before-quit', async (event) => {
+  stopIslandServer();
   if (isQuitting) return;
   event.preventDefault();
   isQuitting = true;
@@ -403,6 +470,7 @@ app.on('before-quit', async (event) => {
   ptyProcesses.forEach(p => p.kill());
   ptyProcesses.clear();
   sidecar?.kill();
+  killIsland();
   app.quit();
 });
 

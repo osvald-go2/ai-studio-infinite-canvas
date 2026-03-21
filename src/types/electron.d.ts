@@ -7,6 +7,40 @@ interface AiBackend {
   openDirectory(): Promise<string | null>;
   getLastProjectDir(): Promise<string | null>;
   scanSkills(platform: string, projectDir: string): Promise<any>;
+
+  // Island integration
+  notifyIsland(event: string, data: any): void;
+  onIslandMessage(callback: (data: { sessionId: string; content: string }) => void): void;
+  onIslandCancel(callback: (data: { sessionId: string }) => void): void;
+  onIslandFetchMessages(callback: (data: { sessionId: string }) => void): void;
+  onIslandRequestSessions(callback: () => void): void;
+  sendIslandSessionsResponse(sessions: any[]): void;
+  sendIslandMessagesHistory(sessionId: string, messages: any[]): void;
+  emitSessionUpdate(data: { sessionId: string; status: string; title?: string; model?: string; lastMessage?: string }): void;
+  emitMessageStream(data: { sessionId: string; messageId: string; chunk: string; done: boolean }): void;
+  emitNotification(data: { sessionId: string; level: 'success' | 'error' | 'info'; text: string }): void;
+  emitSessionDeleted(sessionId: string): void;
+
+  // Island Toggle
+  island: {
+    toggle(enabled: boolean): Promise<void>;
+    getStatus(): Promise<boolean>;
+    onStatusChanged(callback: (running: boolean) => void): () => void;
+  };
+
+  // Chat Popup
+  chatPopup: {
+    getSession(sessionId: string): Promise<any>;
+    close(): Promise<void>;
+    syncMetadata(metadata: { id: string; title: string; status: string; claudeSessionId?: string; codexThreadId?: string }): void;
+    syncMessages(sessionId: string, messages: any[]): void;
+    onSwitchSession(cb: (sessionId: string) => void): () => void;
+  };
+
+  // Scoped IPC (chat-popup: prefix only)
+  ipcOn(channel: string, callback: (...args: any[]) => void): void;
+  ipcOff(channel: string, callback: (...args: any[]) => void): void;
+  ipcSend(channel: string, ...args: any[]): void;
 }
 
 interface Window {

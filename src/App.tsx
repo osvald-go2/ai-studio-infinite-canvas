@@ -14,7 +14,7 @@ import { GitPanel } from './components/git/GitPanel';
 import { TerminalPanel } from './components/terminal/TerminalPanel';
 import { GitProvider } from './contexts/GitProvider';
 import { HomePage } from './components/HomePage';
-import { Session, SessionStatus, DbProject, DbSession } from './types';
+import { Session, SessionStatus, Message, DbProject, DbSession } from './types';
 import { backend } from './services/backend';
 import { gitService } from './services/git';
 import { initialSessions } from './data';
@@ -87,6 +87,34 @@ function findNextGridPosition(
   return { x: maxX + gap, y: 0 };
 }
 
+function extractMessageText(m: Message): string {
+  if (m.role === 'assistant' && m.blocks && m.blocks.length > 0) {
+    const text = m.blocks
+      .filter((b): b is { type: 'text'; content: string } =>
+        b.type === 'text' && !b.content.startsWith('Connected:')
+      )
+      .map(b => b.content)
+      .join('')
+    if (text) return text
+  }
+  return m.content
+}
+
+function getSessionLastMessage(s: Session): string | undefined {
+  if (s.messages.length === 0) return undefined
+  const last = s.messages[s.messages.length - 1]
+  if (last.role === 'assistant' && last.blocks && last.blocks.length > 0) {
+    return last.blocks
+      .filter((b): b is { type: 'text'; content: string } =>
+        b.type === 'text' && !b.content.startsWith('Connected:')
+      )
+      .map(b => b.content)
+      .join('')
+      .slice(0, 100) || undefined
+  }
+  return last.content.slice(0, 100) || undefined
+}
+
 export default function App() {
   const [showHomePage, setShowHomePage] = useState(true);
   const [viewMode, setViewMode] = useState<'canvas' | 'board' | 'tab'>('canvas');
@@ -97,6 +125,7 @@ export default function App() {
 
   // Terminal State
   const [showTerminal, setShowTerminal] = useState(false);
+  const [showIsland, setShowIsland] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   // Git Review State
@@ -357,6 +386,125 @@ export default function App() {
     });
   }, [flushSessionSaves]);
 
+  // Island integration — session-independent listeners (register once)
+  useEffect(() => {
+    if (!window.aiBackend) return
+
+    // Handle message send from Island
+    window.aiBackend.onIslandMessage(({ sessionId, content }) => {
+      const event = new CustomEvent('island:send-message', {
+        detail: { sessionId, content }
+      })
+      window.dispatchEvent(event)
+    })
+
+    // Handle cancel from Island
+    window.aiBackend.onIslandCancel(({ sessionId }) => {
+      const event = new CustomEvent('island:cancel-session', {
+        detail: { sessionId }
+      })
+      window.dispatchEvent(event)
+    })
+  }, [])
+
+  // Island integration — session-dependent listeners
+  useEffect(() => {
+    if (!window.aiBackend) return
+
+    // Respond to session list requests from Island
+    window.aiBackend.onIslandRequestSessions(() => {
+      const islandSessions = sessionsRef.current.map(s => ({
+        id: s.id,
+        title: s.title,
+        model: s.model,
+        status: s.status,
+        lastMessage: getSessionLastMessage(s),
+        messageCount: s.messages.length
+      }))
+      window.aiBackend.sendIslandSessionsResponse(islandSessions)
+    })
+
+    // Handle message history fetch from Island
+    window.aiBackend.onIslandFetchMessages(({ sessionId }) => {
+      const session = sessionsRef.current.find(s => s.id === sessionId)
+      if (session) {
+        const simplifiedMessages = session.messages.map(m => ({
+          id: m.id,
+          role: m.role,
+          content: extractMessageText(m),
+          timestamp: m.timestamp
+        }))
+        window.aiBackend.sendIslandMessagesHistory(sessionId, simplifiedMessages)
+      }
+    })
+  }, [])
+
+  // Chat Popup integration — respond to session data requests + metadata sync
+  useEffect(() => {
+    if (!window.aiBackend?.ipcOn) return
+
+    const handleSessionRequest = (_e: any, { sessionId, requestId }: { sessionId: string; requestId: string }) => {
+      const session = sessionsRef.current.find(s => s.id === sessionId)
+      if (session) {
+        window.aiBackend.ipcSend(
+          `chat-popup:session-response:${requestId}`,
+          JSON.parse(JSON.stringify(session))
+        )
+      }
+    }
+
+    const handleMetadataUpdate = (_e: any, metadata: { id: string; title: string; status: string; claudeSessionId?: string; codexThreadId?: string }) => {
+      setSessions(prev => prev.map(s =>
+        s.id === metadata.id
+          ? { ...s, title: metadata.title, status: metadata.status as any, claudeSessionId: metadata.claudeSessionId, codexThreadId: metadata.codexThreadId }
+          : s
+      ))
+    }
+
+    const handleMessagesUpdate = (_e: any, payload: { sessionId: string; messages: Message[] }) => {
+      setSessions(prev => prev.map(s =>
+        s.id === payload.sessionId ? { ...s, messages: payload.messages } : s
+      ))
+    }
+
+    window.aiBackend.ipcOn('chat-popup:request-session', handleSessionRequest)
+    window.aiBackend.ipcOn('chat-popup:metadata-updated', handleMetadataUpdate)
+    window.aiBackend.ipcOn('chat-popup:messages-updated', handleMessagesUpdate)
+
+    return () => {
+      window.aiBackend.ipcOff('chat-popup:request-session', handleSessionRequest)
+      window.aiBackend.ipcOff('chat-popup:metadata-updated', handleMetadataUpdate)
+      window.aiBackend.ipcOff('chat-popup:messages-updated', handleMessagesUpdate)
+    }
+  }, [])
+
+  // Keep Island in sync — fires when session list, statuses, or titles change
+  const sessionSyncKey = sessions.map(s => `${s.id}:${s.status}:${s.title}`).join(',')
+  useEffect(() => {
+    if (!isElectronApp || !window.aiBackend?.sendIslandSessionsResponse) return
+    const islandSessions = sessions.map(s => ({
+      id: s.id,
+      title: s.title,
+      model: s.model,
+      status: s.status,
+      lastMessage: getSessionLastMessage(s),
+      messageCount: s.messages.length
+    }))
+    window.aiBackend.sendIslandSessionsResponse(islandSessions)
+  }, [sessionSyncKey])
+
+  // Island toggle — sync status on mount and listen for changes
+  useEffect(() => {
+    if (!window.aiBackend?.island) return
+
+    // Query initial status
+    window.aiBackend.island.getStatus().then(setShowIsland).catch(() => {})
+
+    // Listen for status changes (e.g. Island crashed)
+    const cleanup = window.aiBackend.island.onStatusChanged(setShowIsland)
+    return cleanup
+  }, [])
+
   // Persist view mode changes
   useEffect(() => {
     if (!isElectronApp || !currentProject) return;
@@ -387,6 +535,7 @@ export default function App() {
     previousIds.forEach(id => {
       if (!currentIds.has(id)) {
         backend.persistDeleteSession(id).catch(console.error);
+        window.aiBackend?.emitSessionDeleted?.(id);
       }
     });
 
@@ -414,6 +563,24 @@ export default function App() {
     };
 
     setSessions(prev => [...prev, newSession]);
+
+    // Notify Island of new session list
+    if (isElectronApp && window.aiBackend) {
+      // Use setTimeout to ensure sessionsRef.current includes newSession after React re-render
+      setTimeout(() => {
+        const islandSessions = sessionsRef.current.map(s => ({
+          id: s.id,
+          title: s.title,
+          model: s.model,
+          status: s.status,
+          lastMessage: s.messages.length > 0
+            ? getSessionLastMessage(s)
+            : undefined,
+          messageCount: s.messages.length
+        }))
+        window.aiBackend.sendIslandSessionsResponse(islandSessions)
+      }, 0)
+    }
 
     // Immediately persist to DB so the session survives page reloads
     if (isElectronApp && currentProject) {
@@ -521,6 +688,12 @@ export default function App() {
         projects={projects}
         onSwitchProject={switchProject}
         isSwitchingProject={isSwitchingProject}
+        showIsland={showIsland}
+        onToggleIsland={() => {
+          const next = !showIsland
+          setShowIsland(next)
+          window.aiBackend?.island?.toggle(next)
+        }}
       />
 
       <GitProvider projectDir={projectDir} overrideDir={(activeSession?.worktree && activeSession.worktree !== 'default') ? activeSession.worktree : null}>

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { X, Clock, Plus, MessageSquare, Send, Copy, ThumbsUp, ThumbsDown, ArrowUp, Square, Minus, Check, Pencil, RotateCcw, GitBranch, GitFork, Trash2 } from 'lucide-react';
 import { Session, Message, ContentBlock, SkillInfo } from '../types';
 import { MessageRenderer } from './message/MessageRenderer';
@@ -37,7 +37,7 @@ export function SessionWindow({
   height?: number,
   animateHeight?: boolean,
   onHeaderDoubleClick?: (e: React.MouseEvent) => void,
-  variant?: 'default' | 'tab',
+  variant?: 'default' | 'tab' | 'popup',
   projectDir?: string | null,
   onToggleGitPanel?: () => void,
   onCopySession?: (title: string) => void
@@ -55,6 +55,12 @@ export function SessionWindow({
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+
+  const emitIsland = useCallback((method: 'emitSessionUpdate' | 'emitMessageStream' | 'emitNotification', data: any) => {
+    if (isElectron() && window.aiBackend[method]) {
+      window.aiBackend[method](data)
+    }
+  }, [])
 
   const { info, changes } = useGit();
   const [worktreeAdditions, setWorktreeAdditions] = useState(0);
@@ -150,6 +156,12 @@ export function SessionWindow({
 
       if (block.type === 'text' && data.delta.content) {
         (block as any).content += data.delta.content;
+        emitIsland('emitMessageStream', {
+          sessionId: session.id,
+          messageId: streamingMessageIdRef.current || '',
+          chunk: data.delta.content,
+          done: false
+        })
       } else if (block.type === 'code' && data.delta.content) {
         (block as any).code += data.delta.content;
       } else if (block.type === 'tool_call' && data.delta.args) {
@@ -180,6 +192,16 @@ export function SessionWindow({
 
     const handleMessageComplete = async (data: { session_id: string }) => {
       if (data.session_id !== backendSessionIdRef.current) return;
+
+      // Extract text content from blocks BEFORE clearing
+      const completedMsgId = streamingMessageIdRef.current
+      const textContent = Array.from(blockMap.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([_, block]) => block)
+        .filter(b => b.type === 'text' && !(b as any).content.startsWith('Connected:'))
+        .map(b => (b as any).content)
+        .join('')
+
       setIsStreaming(false);
       setStreamingMessageId(null);
       streamingMessageIdRef.current = null;
@@ -206,19 +228,58 @@ export function SessionWindow({
         status: 'review' as const,
         hasChanges,
         changeCount,
+        messages: sessionRef.current.messages.map(m =>
+          m.id === completedMsgId ? { ...m, content: textContent || m.content } : m
+        ),
       };
       sessionRef.current = updated;
       onUpdate(updated);
+
+      // Notify Island — send full text as the final chunk so Island has
+      // authoritative content even if some streaming deltas were missed.
+      emitIsland('emitSessionUpdate', {
+        sessionId: session.id,
+        status: 'review',
+        lastMessage: textContent.slice(0, 50)
+      })
+      emitIsland('emitMessageStream', {
+        sessionId: session.id,
+        messageId: completedMsgId || '',
+        chunk: textContent,
+        done: true
+      })
+      emitIsland('emitNotification', {
+        sessionId: session.id,
+        level: 'success',
+        text: `${sessionRef.current.title} — 回复完成`
+      })
     };
 
     const handleMessageError = (data: { session_id: string; error: { code: number; message: string } }) => {
       if (data.session_id !== backendSessionIdRef.current) return;
+      const errorMsgId = streamingMessageIdRef.current;
       setIsStreaming(false);
       setStreamingMessageId(null);
       streamingMessageIdRef.current = null;
       isStreamingRef.current = false;
       blockMap.clear();
       console.error('[backend error]', data.error);
+      // Notify Island so it exits streaming state and shows error
+      emitIsland('emitSessionUpdate', {
+        sessionId: session.id,
+        status: 'review',
+      })
+      emitIsland('emitMessageStream', {
+        sessionId: session.id,
+        messageId: errorMsgId || '',
+        chunk: `Error: ${data.error.message}`,
+        done: true
+      })
+      emitIsland('emitNotification', {
+        sessionId: session.id,
+        level: 'error',
+        text: `${sessionRef.current.title} — 请求失败`
+      })
     };
 
     const updateAssistantBlocks = (blocks: Map<number, ContentBlock>) => {
@@ -298,6 +359,10 @@ export function SessionWindow({
 
         sessionRef.current = updatedSession;
         onUpdate(updatedSession);
+        emitIsland('emitSessionUpdate', {
+          sessionId: session.id,
+          status: 'inprocess'
+        })
 
         setIsStreaming(true);
         setStreamingMessageId(aiMsgId);
@@ -373,6 +438,10 @@ export function SessionWindow({
 
           sessionRef.current = updatedSession;
           onUpdate(updatedSession);
+          emitIsland('emitSessionUpdate', {
+            sessionId: session.id,
+            status: 'inprocess'
+          })
 
           setIsStreaming(true);
           setStreamingMessageId(aiMsgId);
@@ -471,6 +540,10 @@ export function SessionWindow({
 
     sessionRef.current = updatedSession;
     onUpdate(updatedSession);
+    emitIsland('emitSessionUpdate', {
+      sessionId: session.id,
+      status: 'inprocess'
+    })
 
     setIsStreaming(true);
     setStreamingMessageId(aiMsgId);
@@ -521,6 +594,14 @@ export function SessionWindow({
           };
           sessionRef.current = updated;
           onUpdate(updated);
+          // Notify Island so it exits streaming state
+          emitIsland('emitSessionUpdate', { sessionId: session.id, status: 'review' })
+          emitIsland('emitMessageStream', {
+            sessionId: session.id,
+            messageId: aiMsgId,
+            chunk: `Connection failed: ${errorMsg}`,
+            done: true
+          })
         }
       }
     } else {
@@ -740,22 +821,84 @@ export function SessionWindow({
     return () => window.removeEventListener('keydown', handleEsc);
   }, []);
 
+  // Listen for messages sent from Island ChatPanel
+  useEffect(() => {
+    const handleIslandMessage = (e: Event) => {
+      const { sessionId, content } = (e as CustomEvent).detail
+      if (sessionId === session.id && content && !isStreamingRef.current) {
+        sendMessage(content)
+      }
+    }
+    window.addEventListener('island:send-message', handleIslandMessage)
+    return () => window.removeEventListener('island:send-message', handleIslandMessage)
+  }, [session.id])
+
   const isTab = variant === 'tab';
+  const isPopup = variant === 'popup';
 
   return (
     <div className={`flex flex-col overflow-hidden text-sm text-gray-200 ${
-      isTab
+      isPopup
+        ? 'w-full h-full'
+        : isTab
         ? 'w-full h-full bg-[#1E1814]/80 backdrop-blur-3xl'
         : fullScreen
           ? 'w-full h-full bg-transparent'
           : 'w-[600px] bg-[#1E1814]/80 backdrop-blur-3xl rounded-[32px] border border-white/10 shadow-2xl'
     }`}
-    style={!fullScreen && !isTab && height ? { height, transition: animateHeight ? 'height 0.3s cubic-bezier(0.4, 0, 0.2, 1)' : undefined } : undefined}
+    style={!fullScreen && !isTab && !isPopup && height ? { height, transition: animateHeight ? 'height 0.3s cubic-bezier(0.4, 0, 0.2, 1)' : undefined } : undefined}
     >
       {/* Header */}
-      {isTab ? (
-        <div className="flex items-center justify-end py-4 px-6 select-none shrink-0">
-          <div className="flex items-center gap-2 text-[#9CA3AF]">
+      {isTab || isPopup ? (
+        <div className={`flex items-center justify-between p-4 px-6 select-none shrink-0${isPopup ? ' [-webkit-app-region:drag] bg-[#1E1814]/90' : ''}`}>
+          <div className="flex items-center gap-3 [-webkit-app-region:no-drag]">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${getStatusDotClass(session.status, isStreaming)}`} />
+            {isEditingTitle ? (
+              <input
+                ref={titleInputRef}
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                onBlur={handleTitleSave}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === 'Enter') handleTitleSave();
+                  else if (e.key === 'Escape') handleTitleCancel();
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
+                maxLength={100}
+                className="bg-transparent border-b border-white/30 outline-none font-medium text-white text-sm max-w-[200px]"
+              />
+            ) : (
+              <div className="group/title flex items-center gap-1.5">
+                <span
+                  onDoubleClick={handleTitleDoubleClick}
+                  className="font-medium text-white text-sm truncate max-w-[200px] cursor-default"
+                >
+                  {session.title}
+                </span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleTitleDoubleClick(e); }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className="opacity-0 group-hover/title:opacity-100 text-gray-400 hover:text-white transition-opacity [-webkit-app-region:no-drag]"
+                >
+                  <Pencil size={12} />
+                </button>
+              </div>
+            )}
+            {(session.gitBranch || info.branch) && (
+              <div className="flex items-center gap-1 bg-orange-500/10 border border-orange-500/20 rounded-lg px-2 py-0.5 shrink-0">
+                <GitBranch size={12} className="text-orange-400" />
+                <span className="text-[11px] font-mono text-orange-300 truncate max-w-[120px]">{session.gitBranch || info.branch}</span>
+              </div>
+            )}
+            {session.worktree && session.worktree !== 'default' && (
+              <div className="flex items-center gap-1 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2 py-0.5 shrink-0">
+                <GitFork size={12} className="text-amber-400" />
+                <span className="text-[11px] font-mono text-amber-300">worktree</span>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-3 text-gray-400 [-webkit-app-region:no-drag]">
             <div className="relative" ref={historyRef}>
               <button
                 onClick={() => setShowHistory(!showHistory)}
@@ -802,8 +945,17 @@ export function SessionWindow({
               title="复制 session"
               onClick={() => onCopySession?.(session.title)}
             >
-              <Copy size={18} />
+              <Copy size={20} />
             </button>
+            {isPopup && (
+              <button
+                onClick={onClose}
+                className="hover:text-gray-200 transition-colors"
+                title="关闭"
+              >
+                <X size={18} />
+              </button>
+            )}
             {onDelete && (
               <button
                 onClick={() => { if (window.confirm('确定要删除这个 session 吗？')) onDelete(); }}
@@ -958,7 +1110,7 @@ export function SessionWindow({
         ref={scrollContainerRef}
         onMouseDown={(e) => e.stopPropagation()}
         className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar ${
-          isTab ? 'pt-2 px-6 pb-6'
+          isTab || isPopup ? 'pt-2 px-6 pb-6'
           : fullScreen ? 'p-8'
           : `p-6 pt-2${height ? '' : ' max-h-[600px]'}`
         }`}
@@ -1037,7 +1189,7 @@ export function SessionWindow({
 
       {/* Bottom Input */}
       {!(height && height <= 110) && <div className={`shrink-0 ${
-        isTab ? 'p-4 pb-6 w-full max-w-4xl mx-auto'
+        isTab || isPopup ? 'p-4 pb-6 w-full max-w-4xl mx-auto'
         : `p-4 pb-6 ${fullScreen ? 'w-full max-w-4xl mx-auto' : 'px-6'}`
       }`}>
         <div className="bg-[#9A6A45]/30 rounded-[24px] p-2 flex flex-col gap-2 backdrop-blur-xl border border-white/10 shadow-xl focus-within:border-white/20 focus-within:ring-4 focus-within:ring-white/5 transition-all">
