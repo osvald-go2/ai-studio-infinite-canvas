@@ -123,6 +123,7 @@ export default function App() {
 
   // Terminal State
   const [showTerminal, setShowTerminal] = useState(false);
+  const [showIsland, setShowIsland] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   // Git Review State
@@ -427,12 +428,20 @@ export default function App() {
       ))
     }
 
+    const handleMessagesUpdate = (_e: any, payload: { sessionId: string; messages: Message[] }) => {
+      setSessions(prev => prev.map(s =>
+        s.id === payload.sessionId ? { ...s, messages: payload.messages } : s
+      ))
+    }
+
     window.aiBackend.ipcOn('chat-popup:request-session', handleSessionRequest)
     window.aiBackend.ipcOn('chat-popup:metadata-updated', handleMetadataUpdate)
+    window.aiBackend.ipcOn('chat-popup:messages-updated', handleMessagesUpdate)
 
     return () => {
       window.aiBackend.ipcOff('chat-popup:request-session', handleSessionRequest)
       window.aiBackend.ipcOff('chat-popup:metadata-updated', handleMetadataUpdate)
+      window.aiBackend.ipcOff('chat-popup:messages-updated', handleMessagesUpdate)
     }
   }, [])
 
@@ -450,6 +459,18 @@ export default function App() {
     }))
     window.aiBackend.sendIslandSessionsResponse(islandSessions)
   }, [sessionSyncKey])
+
+  // Island toggle — sync status on mount and listen for changes
+  useEffect(() => {
+    if (!window.aiBackend?.island) return
+
+    // Query initial status
+    window.aiBackend.island.getStatus().then(setShowIsland).catch(() => {})
+
+    // Listen for status changes (e.g. Island crashed)
+    const cleanup = window.aiBackend.island.onStatusChanged(setShowIsland)
+    return cleanup
+  }, [])
 
   // Persist view mode changes
   useEffect(() => {
@@ -616,6 +637,12 @@ export default function App() {
         projects={projects}
         onSwitchProject={switchProject}
         isSwitchingProject={isSwitchingProject}
+        showIsland={showIsland}
+        onToggleIsland={() => {
+          const next = !showIsland
+          setShowIsland(next)
+          window.aiBackend?.island?.toggle(next)
+        }}
       />
 
       <GitProvider projectDir={projectDir} overrideDir={(activeSession?.worktree && activeSession.worktree !== 'default') ? activeSession.worktree : null}>

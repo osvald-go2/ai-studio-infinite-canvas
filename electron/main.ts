@@ -8,8 +8,9 @@ import * as pty from 'node-pty';
 import { SidecarManager } from './sidecar';
 import { startIslandServer, stopIslandServer } from './islandServer';
 import { destroyChatPopup, hideChatPopup } from './chatPopupManager';
+import { spawnIsland, killIsland, isIslandRunning } from './islandManager';
 
-const store = new Store<{ anthropicApiKey?: string; lastProjectDir?: string }>();
+const store = new Store<{ anthropicApiKey?: string; lastProjectDir?: string; islandEnabled?: boolean }>();
 
 let mainWindow: BrowserWindow | null = null;
 let sidecar: SidecarManager | null = null;
@@ -202,6 +203,12 @@ ipcMain.on('chat-popup:sync-metadata', (_e, metadata: any) => {
   }
 });
 
+ipcMain.on('chat-popup:sync-messages', (_e, payload: any) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('chat-popup:messages-updated', payload);
+  }
+});
+
 ipcMain.handle('get-working-dir', () => {
   return process.cwd();
 });
@@ -218,6 +225,21 @@ ipcMain.handle('dialog:openDirectory', async () => {
 
 ipcMain.handle('config:getLastProjectDir', () => {
   return store.get('lastProjectDir', null);
+});
+
+// ── Island Toggle IPC ──
+
+ipcMain.handle('island:toggle', (_, enabled: boolean) => {
+  store.set('islandEnabled', enabled);
+  if (enabled) {
+    spawnIsland();
+  } else {
+    killIsland();
+  }
+});
+
+ipcMain.handle('island:get-status', () => {
+  return isIslandRunning();
 });
 
 ipcMain.handle('scan-skills', async (_, platform: string, projectDir: string) => {
@@ -413,6 +435,9 @@ app.whenReady().then(() => {
   startSidecar();
   createWindow();
   startIslandServer(mainWindow!);
+  if (store.get('islandEnabled')) {
+    spawnIsland();
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -442,6 +467,7 @@ app.on('before-quit', async (event) => {
   ptyProcesses.forEach(p => p.kill());
   ptyProcesses.clear();
   sidecar?.kill();
+  killIsland();
   app.quit();
 });
 

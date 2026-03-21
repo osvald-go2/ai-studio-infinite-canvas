@@ -21,11 +21,19 @@ interface AiBackend {
   emitNotification(data: { sessionId: string; level: 'success' | 'error' | 'info'; text: string }): void;
   emitSessionDeleted(sessionId: string): void;
 
+  // Island Toggle
+  island: {
+    toggle(enabled: boolean): Promise<void>;
+    getStatus(): Promise<boolean>;
+    onStatusChanged(callback: (running: boolean) => void): () => void;
+  };
+
   // Chat Popup
   chatPopup: {
     getSession(sessionId: string): Promise<any>;
     close(): Promise<void>;
     syncMetadata(metadata: { id: string; title: string; status: string; claudeSessionId?: string; codexThreadId?: string }): void;
+    syncMessages(sessionId: string, messages: any[]): void;
     onSwitchSession(cb: (sessionId: string) => void): () => void;
   };
 

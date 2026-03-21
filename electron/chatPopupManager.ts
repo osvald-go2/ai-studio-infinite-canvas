@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, screen } from 'electron'
 import path from 'path'
 
 let chatPopupWindow: BrowserWindow | null = null
@@ -11,12 +11,22 @@ export function createChatPopupWindow(sessionId: string): void {
     return
   }
 
+  const primaryDisplay = screen.getPrimaryDisplay()
+  const displayBounds = primaryDisplay.bounds
+  const workArea = primaryDisplay.workArea
+  const winW = 632
+  const winH = 932
+  const x = displayBounds.x + Math.round((displayBounds.width - winW) / 2)
+  const y = workArea.y + Math.round((workArea.height - winH) / 2)
+
   chatPopupWindow = new BrowserWindow({
-    width: 480,
-    height: 820,
+    width: winW,
+    height: winH,
+    x,
+    y,
     frame: false,
-    transparent: false,
-    backgroundColor: '#1A1A2E',
+    transparent: true,
+    hasShadow: false,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.mjs'),
       sandbox: false,

@@ -123,6 +123,19 @@ contextBridge.exposeInMainWorld('aiBackend', {
     ipcRenderer.send('island:session-deleted', { sessionId })
   },
 
+  // ── Island Toggle API ──
+  island: {
+    toggle: (enabled: boolean): Promise<void> =>
+      ipcRenderer.invoke('island:toggle', enabled),
+    getStatus: (): Promise<boolean> =>
+      ipcRenderer.invoke('island:get-status'),
+    onStatusChanged: (callback: (running: boolean) => void): (() => void) => {
+      const handler = (_: any, running: boolean) => callback(running)
+      ipcRenderer.on('island:status-changed', handler)
+      return () => ipcRenderer.removeListener('island:status-changed', handler)
+    },
+  },
+
   // ── Chat Popup API ──
   chatPopup: {
     getSession: (sessionId: string): Promise<any> =>
@@ -131,6 +144,8 @@ contextBridge.exposeInMainWorld('aiBackend', {
       ipcRenderer.invoke('chat-popup:close'),
     syncMetadata: (metadata: { id: string; title: string; status: string; claudeSessionId?: string; codexThreadId?: string }) =>
       ipcRenderer.send('chat-popup:sync-metadata', metadata),
+    syncMessages: (sessionId: string, messages: any[]) =>
+      ipcRenderer.send('chat-popup:sync-messages', { sessionId, messages }),
     onSwitchSession: (cb: (sessionId: string) => void) => {
       const handler = (_e: any, sessionId: string) => cb(sessionId)
       ipcRenderer.on('chat-popup:switch-session', handler)
