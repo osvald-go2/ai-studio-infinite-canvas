@@ -3,6 +3,7 @@ import { X, GitBranch, FolderGit2, ChevronDown, MessageSquare, PenLine, GitFork 
 import { gitService } from '../services/git';
 import type { BranchInfo } from '../types/git';
 import { useFocusTrap } from '../utils/useFocusTrap';
+import { MODEL_VARIANTS, type ProviderId } from '../models';
 
 interface NewSessionModalProps {
   isOpen: boolean;
@@ -38,15 +39,16 @@ const GeminiIcon = () => (
   </svg>
 );
 
-const MODELS = [
-  { id: 'claude-code', name: 'Claude Code', icon: ClaudeIcon },
+const PROVIDERS: { id: ProviderId; name: string; icon: React.FC }[] = [
+  { id: 'claude', name: 'Claude Code', icon: ClaudeIcon },
   { id: 'codex', name: 'Codex', icon: CodexIcon },
-  { id: 'gemini-cli', name: 'Gemini CLI', icon: GeminiIcon },
+  { id: 'gemini', name: 'Gemini CLI', icon: GeminiIcon },
 ];
 
 export function NewSessionModal({ isOpen, onClose, onCreate, projectDir, isGitRepo, defaultTitle }: NewSessionModalProps) {
   const [title, setTitle] = useState('');
-  const [model, setModel] = useState('claude-code');
+  const [provider, setProvider] = useState<ProviderId>('claude');
+  const [model, setModel] = useState(MODEL_VARIANTS.claude.defaultVariant);
   const [gitBranch, setGitBranch] = useState('main');
   const [worktree, setWorktree] = useState('default');
   const [initialPrompt, setInitialPrompt] = useState('');
@@ -112,7 +114,8 @@ export function NewSessionModal({ isOpen, onClose, onCreate, projectDir, isGitRe
     onCreate(title, model, finalBranch, finalWorktree, initialPrompt);
     // Reset
     setTitle('');
-    setModel('claude-code');
+    setProvider('claude');
+    setModel(MODEL_VARIANTS.claude.defaultVariant);
     setGitBranch('main');
     setWorktree('default');
     setInitialPrompt('');
@@ -150,17 +153,20 @@ export function NewSessionModal({ isOpen, onClose, onCreate, projectDir, isGitRe
           {/* [H1] Model — radiogroup semantics */}
           <fieldset>
             <legend className="block text-[15px] font-medium text-white mb-3">Model</legend>
-            <div className="grid grid-cols-3 gap-3" role="radiogroup" aria-label="Model">
-              {MODELS.map((m) => {
-                const Icon = m.icon;
-                const isSelected = model === m.id;
+            <div className="grid grid-cols-3 gap-3" role="radiogroup" aria-label="Provider">
+              {PROVIDERS.map((p) => {
+                const Icon = p.icon;
+                const isSelected = provider === p.id;
                 return (
                   <button
-                    key={m.id}
+                    key={p.id}
                     type="button"
                     role="radio"
                     aria-checked={isSelected}
-                    onClick={() => setModel(m.id)}
+                    onClick={() => {
+                      setProvider(p.id);
+                      setModel(MODEL_VARIANTS[p.id].defaultVariant);
+                    }}
                     className={`flex flex-col items-center justify-center gap-2.5 py-5 px-3 rounded-xl border transition-all ${
                       isSelected
                         ? 'bg-white/[0.08] border-white/[0.12] text-white'
@@ -168,11 +174,29 @@ export function NewSessionModal({ isOpen, onClose, onCreate, projectDir, isGitRe
                     }`}
                   >
                     <Icon />
-                    <span className="text-[13px] font-medium">{m.name}</span>
+                    <span className="text-[13px] font-medium">{p.name}</span>
                   </button>
                 );
               })}
             </div>
+            {MODEL_VARIANTS[provider].variants.length > 1 && (
+              <div className="flex gap-2 mt-3">
+                {MODEL_VARIANTS[provider].variants.map((v) => (
+                  <button
+                    key={v.id}
+                    type="button"
+                    onClick={() => setModel(v.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                      model === v.id
+                        ? 'bg-white/[0.1] border-white/[0.15] text-white'
+                        : 'bg-white/[0.03] border-white/[0.06] text-gray-400 hover:bg-white/[0.06] hover:text-gray-300'
+                    }`}
+                  >
+                    {v.name}
+                  </button>
+                ))}
+              </div>
+            )}
           </fieldset>
 
           {/* [C1] Worktree Toggle — role="switch" with aria-checked */}
