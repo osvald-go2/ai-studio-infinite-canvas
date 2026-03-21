@@ -9,7 +9,7 @@ import { getStatusDotClass } from '../utils/statusColors';
 import { SkillPicker } from './SkillPicker';
 import { scanSkills } from '../services/skillScanner';
 import { useGit } from '../contexts/GitProvider';
-import { getAgentType, getModelDisplayName, getSiblingVariants } from '../models';
+import { getAgentType, getModelDisplayName, getModelFullLabel, getSiblingVariants } from '../models';
 
 function isElectron(): boolean {
   return typeof window !== 'undefined' && window.aiBackend !== undefined;
@@ -927,45 +927,6 @@ export function SessionWindow({
                 </button>
               </div>
             )}
-            {/* Model variant switcher */}
-            {getSiblingVariants(session.model).length > 1 && (
-              <div className="relative shrink-0" ref={modelPickerRef}>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); setShowModelPicker(!showModelPicker); }}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  disabled={isStreaming}
-                  className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium border transition-all ${
-                    isStreaming
-                      ? 'opacity-40 cursor-not-allowed bg-white/[0.03] border-white/[0.06] text-gray-500'
-                      : 'bg-white/[0.06] border-white/[0.08] text-gray-300 hover:bg-white/[0.1] hover:text-white'
-                  }`}
-                  title={isStreaming ? '流式响应中无法切换模型' : '切换模型'}
-                >
-                  {getModelDisplayName(session.model)}
-                  <ChevronDown size={10} />
-                </button>
-                {showModelPicker && (
-                  <div className="absolute top-full left-0 mt-1 z-50 bg-gray-900 border border-white/10 rounded-lg shadow-xl py-1 min-w-[140px]">
-                    {getSiblingVariants(session.model).map((v) => (
-                      <button
-                        key={v.id}
-                        onClick={(e) => { e.stopPropagation(); handleSwitchModel(v.id); }}
-                        onMouseDown={(e) => e.stopPropagation()}
-                        className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
-                          v.id === session.model
-                            ? 'text-white bg-white/[0.08]'
-                            : 'text-gray-400 hover:text-white hover:bg-white/[0.06]'
-                        }`}
-                      >
-                        {v.name}
-                        {v.id === session.model && <Check size={10} className="inline ml-2" />}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
             {(session.gitBranch || info.branch) && (
               <div className="flex items-center gap-1 bg-orange-500/10 border border-orange-500/20 rounded-lg px-2 py-0.5 shrink-0">
                 <GitBranch size={12} className="text-orange-400" />
@@ -1191,10 +1152,40 @@ export function SessionWindow({
               <button aria-label="Add attachment" className="w-8 h-8 rounded-full flex items-center justify-center transition-colors bg-white/[0.06] text-gray-400 hover:text-white hover:bg-white/10">
                 <Plus size={16} />
               </button>
-              <button className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium text-gray-300 hover:text-white transition-colors">
-                Claude Opus 4.6
-                <ChevronDown size={12} className="text-gray-500" />
-              </button>
+              {/* Model variant switcher */}
+              <div className="relative" ref={modelPickerRef}>
+                <button
+                  onClick={() => setShowModelPicker(!showModelPicker)}
+                  disabled={isStreaming}
+                  className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                    isStreaming
+                      ? 'opacity-40 cursor-not-allowed text-gray-500'
+                      : 'text-gray-300 hover:text-white'
+                  }`}
+                  title={isStreaming ? '流式响应中无法切换模型' : '切换模型'}
+                >
+                  {getModelFullLabel(session.model)}
+                  <ChevronDown size={12} className="text-gray-500" />
+                </button>
+                {showModelPicker && (
+                  <div className="absolute bottom-full left-0 mb-1 z-50 bg-gray-900 border border-white/10 rounded-lg shadow-xl py-1 min-w-[160px]">
+                    {getSiblingVariants(session.model).map((v) => (
+                      <button
+                        key={v.id}
+                        onClick={() => handleSwitchModel(v.id)}
+                        className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
+                          v.id === session.model
+                            ? 'text-white bg-white/[0.08]'
+                            : 'text-gray-400 hover:text-white hover:bg-white/[0.06]'
+                        }`}
+                      >
+                        {v.name}
+                        {v.id === session.model && <Check size={10} className="inline ml-2" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {(totalAdditions > 0 || totalDeletions > 0) && (
                 <button
