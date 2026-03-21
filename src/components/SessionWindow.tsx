@@ -9,6 +9,7 @@ import { getStatusDotClass } from '../utils/statusColors';
 import { SkillPicker } from './SkillPicker';
 import { scanSkills } from '../services/skillScanner';
 import { useGit } from '../contexts/GitProvider';
+import { getAgentType } from '../models';
 
 function isElectron(): boolean {
   return typeof window !== 'undefined' && window.aiBackend !== undefined;
@@ -307,7 +308,7 @@ export function SessionWindow({
           if (!backendSessionIdRef.current) {
             console.log('[session] creating backend session, model:', session.model);
             const sid = await backend.createSession(session.model,
-              sessionRef.current.model === 'codex'
+              getAgentType(sessionRef.current.model) === 'codex'
                 ? { codexThreadId: sessionRef.current.codexThreadId }
                 : { claudeSessionId: sessionRef.current.claudeSessionId }
             );
@@ -381,7 +382,7 @@ export function SessionWindow({
           if (isElectron()) {
             if (!backendSessionIdRef.current) {
               const sid = await backend.createSession(session.model,
-              sessionRef.current.model === 'codex'
+              getAgentType(sessionRef.current.model) === 'codex'
                 ? { codexThreadId: sessionRef.current.codexThreadId }
                 : { claudeSessionId: sessionRef.current.claudeSessionId }
             );
@@ -396,7 +397,7 @@ export function SessionWindow({
               setBackendSessionId(null);
               try {
                 const sid = await backend.createSession(session.model,
-              sessionRef.current.model === 'codex'
+              getAgentType(sessionRef.current.model) === 'codex'
                 ? { codexThreadId: sessionRef.current.codexThreadId }
                 : { claudeSessionId: sessionRef.current.claudeSessionId }
             );
@@ -480,7 +481,7 @@ export function SessionWindow({
       // Create backend session if not already created
       if (!backendSessionIdRef.current) {
         const sid = await backend.createSession(session.model,
-              sessionRef.current.model === 'codex'
+              getAgentType(sessionRef.current.model) === 'codex'
                 ? { codexThreadId: sessionRef.current.codexThreadId }
                 : { claudeSessionId: sessionRef.current.claudeSessionId }
             );
@@ -496,7 +497,7 @@ export function SessionWindow({
         setBackendSessionId(null);
         try {
           const sid = await backend.createSession(session.model,
-              sessionRef.current.model === 'codex'
+              getAgentType(sessionRef.current.model) === 'codex'
                 ? { codexThreadId: sessionRef.current.codexThreadId }
                 : { claudeSessionId: sessionRef.current.claudeSessionId }
             );

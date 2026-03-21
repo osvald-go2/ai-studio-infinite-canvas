@@ -3,6 +3,7 @@ import { Session } from '../types';
 import { SessionWindow } from './SessionWindow';
 import { ZoomIn, ZoomOut, Maximize, Hand, MousePointer2, Send, Map, LayoutGrid } from 'lucide-react';
 import { SESSION_WIDTH, SESSION_MIN_WIDTH, SESSION_MAX_WIDTH, SESSION_DEFAULT_HEIGHT, SESSION_MIN_HEIGHT, SESSION_GAP, START_X, START_Y } from '@/constants';
+import { getAgentType } from '../models';
 
 export function CanvasView({
   sessions,
@@ -708,7 +709,7 @@ function CanvasMinimap({
             const pos = toMinimap(s.position.x, s.position.y);
             const w = (s.width ?? SESSION_WIDTH) * minimapScale;
             const h = (s.height ?? SESSION_DEFAULT_HEIGHT) * minimapScale;
-            const color = MODEL_COLORS[s.model] || '#94a3b8';
+            const color = MODEL_COLORS[getAgentType(s.model)] || '#94a3b8';
             return (
               <rect
                 key={s.id}

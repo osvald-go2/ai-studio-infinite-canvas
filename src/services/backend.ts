@@ -45,6 +45,14 @@ export const backend = {
     });
   },
 
+  async switchModel(sessionId: string, model: string): Promise<void> {
+    if (!isElectron()) return;
+    await window.aiBackend.invoke('session.switch_model', {
+      session_id: sessionId,
+      model,
+    });
+  },
+
   async setApiKey(apiKey: string): Promise<void> {
     if (!isElectron()) return;
     await window.aiBackend.invoke('config.set_api_key', {

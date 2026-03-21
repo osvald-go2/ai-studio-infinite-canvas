@@ -17,6 +17,7 @@ import { Session, SessionStatus, DbProject, DbSession } from './types';
 import { backend } from './services/backend';
 import { gitService } from './services/git';
 import { initialSessions } from './data';
+import { migrateModel } from './models';
 import { SESSION_WIDTH, SESSION_DEFAULT_HEIGHT, SESSION_GAP } from '@/constants';
 
 function findNextGridPosition(
@@ -149,7 +150,7 @@ export default function App() {
       return {
         id: s.id,
         title: s.title,
-        model: s.model,
+        model: migrateModel(s.model),
         status: s.status as SessionStatus,
         position: { x: s.position_x, y: s.position_y },
         height: s.height ?? undefined,
