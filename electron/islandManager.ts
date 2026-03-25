@@ -1,6 +1,7 @@
 import { spawn, ChildProcess } from 'child_process'
 import { app, BrowserWindow } from 'electron'
 import path from 'path'
+import { getIslandPort } from './islandServer'
 
 let islandProcess: ChildProcess | null = null
 
@@ -30,6 +31,8 @@ export function spawnIsland(): void {
       ANTHROPIC_API_KEY: undefined,
       GEMINI_API_KEY: undefined,
       ELECTRON_RENDERER_URL: undefined,
+      // Pass the actual WS port (may differ from default if port was busy)
+      ISLAND_WS_PORT: String(getIslandPort()),
     } as NodeJS.ProcessEnv
   })
 

@@ -3,16 +3,48 @@ import { BrowserWindow, ipcMain } from 'electron'
 import { createChatPopupWindow, hideChatPopup } from './chatPopupManager'
 
 const DEFAULT_PORT = 9720
+const MAX_PORT_ATTEMPTS = 10
 
 let wss: WebSocketServer | null = null
 let clients: Set<WebSocket> = new Set()
+let activePort: number = DEFAULT_PORT
+
+/** The port the WebSocket server is actually listening on. */
+export function getIslandPort(): number {
+  return activePort
+}
+
+function tryListen(port: number, mainWindow: BrowserWindow, attempt: number): void {
+  const server = new WebSocketServer({ port })
+
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE' && attempt < MAX_PORT_ATTEMPTS) {
+      console.warn(`[IslandServer] Port ${port} in use, trying ${port + 1}…`)
+      server.close()
+      tryListen(port + 1, mainWindow, attempt + 1)
+    } else {
+      console.error(`[IslandServer] Failed to start WebSocket server:`, err)
+    }
+  })
+
+  server.on('listening', () => {
+    wss = server
+    activePort = port
+    console.log(`[IslandServer] WebSocket server listening on ws://localhost:${port}`)
+    setupConnections(mainWindow)
+  })
+}
 
 export function startIslandServer(mainWindow: BrowserWindow): void {
   const port = process.env.ISLAND_WS_PORT
     ? parseInt(process.env.ISLAND_WS_PORT, 10)
     : DEFAULT_PORT
 
-  wss = new WebSocketServer({ port })
+  tryListen(port, mainWindow, 0)
+}
+
+function setupConnections(mainWindow: BrowserWindow): void {
+  if (!wss) return
 
   wss.on('connection', (ws) => {
     clients.add(ws)
@@ -67,8 +99,6 @@ export function startIslandServer(mainWindow: BrowserWindow): void {
   ipcMain.on('island:session-deleted', (_e, data) => {
     broadcast({ type: 'session:delete', sessionId: data.sessionId })
   })
-
-  console.log(`[IslandServer] WebSocket server listening on ws://localhost:${port}`)
 }
 
 function handleClientMessage(mainWindow: BrowserWindow, msg: any): void {

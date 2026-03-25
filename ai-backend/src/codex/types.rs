@@ -23,6 +23,11 @@ pub enum CodexEvent {
         item: CodexItem,
     },
 
+    #[serde(rename = "item.updated")]
+    ItemUpdated {
+        item: CodexItem,
+    },
+
     #[serde(rename = "turn.completed")]
     TurnCompleted {
         usage: Option<CodexUsage>,
@@ -42,9 +47,25 @@ pub struct CodexItem {
     pub text: Option<String>,
     pub command: Option<String>,
     pub output: Option<String>,
+    pub aggregated_output: Option<String>,
     pub exit_code: Option<i32>,
     pub filename: Option<String>,
+    pub changes: Option<Vec<CodexChange>>,
+    pub items: Option<Vec<CodexTodoItem>>,
     pub content: Option<Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CodexChange {
+    pub path: String,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CodexTodoItem {
+    pub text: String,
+    #[serde(default)]
+    pub completed: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
