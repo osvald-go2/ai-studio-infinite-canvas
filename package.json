@@ -1,7 +1,11 @@
 {
   "name": "ai-studio-infinite-canvas",
-  "private": true,
   "version": "1.0.0",
+  "license": "MIT",
+  "repository": "github:osvald-go2/ai-studio-infinite-canvas",
+  "homepage": "https://github.com/osvald-go2/ai-studio-infinite-canvas",
+  "bugs": "https://github.com/osvald-go2/ai-studio-infinite-canvas/issues",
+  "keywords": ["ai", "infinite-canvas", "react", "electron", "gemini"],
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
