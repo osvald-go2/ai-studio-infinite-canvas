@@ -180,6 +180,8 @@ export function SessionWindow({
         (block as any).code += data.delta.content;
       } else if (block.type === 'tool_call' && data.delta.args) {
         (block as any).args += data.delta.args;
+      } else if (block.type === 'todolist' && data.delta.items) {
+        (block as any).items = data.delta.items;
       }
       blockMap.set(data.block_index, { ...block });
       updateAssistantBlocks(blockMap);
@@ -198,6 +200,8 @@ export function SessionWindow({
         (block as any).status = resolvedStatus;
       } else if (block.type === 'skill') {
         (block as any).status = resolvedStatus === 'error' ? 'error' : 'done';
+      } else if (block.type === 'todolist') {
+        (block as any).status = resolvedStatus;
       }
 
       blockMap.set(data.block_index, { ...block });
