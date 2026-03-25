@@ -132,9 +132,17 @@ pub async fn process_codex_stream(
 
                 let (delta_content, status) = item_completed_content(&item);
 
+                // Resolve the correct block index for this item.
+                // Items that had an item.started (e.g. long-lived todo_list) have
+                // their block index recorded in item_block_index.  Fall back to the
+                // most-recently-created block (block_index - 1) for items that were
+                // synthesised inline above.
+                let target_index = item.id.as_ref()
+                    .and_then(|id| item_block_index.get(id).copied())
+                    .unwrap_or_else(|| if block_index > 0 { block_index - 1 } else { 0 });
+
                 // Emit block.delta with the final content / output
                 if let Some(content) = delta_content {
-                    let target_index = if block_index > 0 { block_index - 1 } else { 0 };
                     let _ = event_tx.send(Event::new(
                         "block.delta",
                         json!({
@@ -147,18 +155,15 @@ pub async fn process_codex_stream(
                 }
 
                 // Emit block.stop
-                if block_index > 0 {
-                    let target_index = block_index - 1;
-                    let _ = event_tx.send(Event::new(
-                        "block.stop",
-                        json!({
-                            "session_id": session_id,
-                            "block_index": target_index,
-                            "status": status,
-                            "agent": "codex",
-                        }),
-                    ));
-                }
+                let _ = event_tx.send(Event::new(
+                    "block.stop",
+                    json!({
+                        "session_id": session_id,
+                        "block_index": target_index,
+                        "status": status,
+                        "agent": "codex",
+                    }),
+                ));
 
             }
 
