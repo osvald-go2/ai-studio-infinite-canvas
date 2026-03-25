@@ -31,7 +31,6 @@ export function FormTableBlock({
   };
 
   const handleSubmit = () => {
-    console.log('表单数据:', rows);
     setSubmitted(true);
   };
 

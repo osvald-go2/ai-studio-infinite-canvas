@@ -385,18 +385,15 @@ export function SessionWindow({
 
         if (isElectron()) {
           if (!backendSessionIdRef.current) {
-            console.log('[session] creating backend session, model:', session.model);
             const sid = await backend.createSession(session.model,
               getAgentType(sessionRef.current.model) === 'codex'
                 ? { codexThreadId: sessionRef.current.codexThreadId }
                 : { claudeSessionId: sessionRef.current.claudeSessionId }
             );
-            console.log('[session] backend session created:', sid);
             backendSessionIdRef.current = sid;
             setBackendSessionId(sid);
           }
           try {
-            console.log('[session] sending message to', backendSessionIdRef.current, 'model:', session.model);
             await backend.sendMessage(backendSessionIdRef.current, initialText);
           } catch (e) {
             setIsStreaming(false);
@@ -752,14 +749,10 @@ export function SessionWindow({
     setInputValue(val);
     inputValueRef.current = val;
 
-    const isFirstMessage = session.messages.length === 0;
-    console.log(`[SessionWindow] handleInputChange: val="${val}", isFirstMessage=${isFirstMessage}, skills.length=${skills.length}, model=${session.model}, projectDir=${projectDir}`);
-
     if (val.startsWith('/') && val.length >= 1) {
       let currentSkills = skills;
       if (currentSkills.length === 0) {
         currentSkills = await scanSkills(session.model, projectDir);
-        console.log(`[SessionWindow] scanSkills returned ${currentSkills.length} skills`);
         if (!inputValueRef.current.startsWith('/')) return;
         setSkills(currentSkills);
       }

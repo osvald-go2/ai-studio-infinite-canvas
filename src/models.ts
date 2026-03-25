@@ -62,12 +62,6 @@ export function getSiblingVariants(modelId: string): ModelVariant[] {
   return MODEL_VARIANTS[provider].variants;
 }
 
-export function getCliFlag(modelId: string): string | null {
-  const provider = getAgentType(modelId);
-  const variant = MODEL_VARIANTS[provider].variants.find(v => v.id === modelId);
-  return variant?.cliFlag ?? null;
-}
-
 export function migrateModel(model: string): string {
   if (model === 'claude-code') return 'claude-sonnet-4-6';
   if (model === 'codex') return 'codex-gpt-5-4';
