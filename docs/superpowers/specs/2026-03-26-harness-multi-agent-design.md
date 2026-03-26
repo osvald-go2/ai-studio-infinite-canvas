@@ -19,6 +19,7 @@ Inspired by [Anthropic's Harness Design for Long-Running Apps](https://www.anthr
 - Real-time streaming between sessions (communication is file-based, at completion boundaries)
 - Custom role types beyond Planner/Generator/Evaluator (future consideration)
 - Cross-project harness groups
+- Board/Tab view connection visualization (Canvas-only feature; pipeline runs headlessly in other views)
 
 ---
 
@@ -67,6 +68,33 @@ interface Session {
 }
 ```
 
+### DB Persistence Schema
+
+HarnessGroup and HarnessConnection are stored as a JSON blob in a new `harness_groups` table:
+
+```typescript
+interface DbHarnessGroup {
+  id: string;                    // PRIMARY KEY
+  project_id: string;            // FOREIGN KEY -> projects.id
+  name: string;
+  connections_json: string;      // JSON-serialized HarnessConnection[]
+  max_retries: number;
+  status: string;
+  current_sprint: number;
+  current_round: number;
+  harness_dir: string;
+  created_at: string;
+  updated_at: string;
+}
+```
+
+New IPC methods required in backend:
+- `harness.saveGroup(group: DbHarnessGroup): Promise<void>`
+- `harness.loadGroups(projectId: string): Promise<DbHarnessGroup[]>`
+- `harness.deleteGroup(groupId: string): Promise<void>`
+
+Groups are loaded in `applyProject()` alongside sessions. Session's `harnessRole` and `harnessGroupId` fields are derived from the group's connections at load time (not stored separately in the session table).
+
 ### File Structure
 
 ```
@@ -86,10 +114,26 @@ interface Session {
 
 ## 2. HarnessController
 
+### React Integration
+
+HarnessController is implemented as a **custom React hook** (`useHarnessController`) that lives in App.tsx, consistent with the project's hooks + prop drilling pattern:
+
+```typescript
+// In App.tsx
+const harness = useHarnessController(sessions, setSessions, projectDir);
+// harness exposes: groups, createGroup, addConnection, startPipeline, etc.
+// Passed down to CanvasView and HarnessControlBar via props
+```
+
+The hook internally manages `harnessGroups: HarnessGroup[]` state via `useState`, and uses `useEffect` to register a global `message.complete` listener for pipeline orchestration.
+
 ### Interface
 
 ```typescript
 interface HarnessController {
+  // State
+  groups: HarnessGroup[];
+
   // Connection management
   createGroup(name: string): HarnessGroup;
   addConnection(groupId: string, from: string, to: string, fromRole: HarnessRole, toRole: HarnessRole): void;
@@ -99,11 +143,38 @@ interface HarnessController {
   startPipeline(groupId: string, userPrompt: string): void;
   pausePipeline(groupId: string): void;
   resumePipeline(groupId: string): void;
+  stopPipeline(groupId: string): void;
 
   // Internal
   onSessionComplete(sessionId: string, groupId: string): void;
 }
 ```
+
+### Message Injection
+
+The Controller needs to programmatically send messages to sessions AND trigger AI responses. This requires a new `injectMessage` function exposed from SessionWindow:
+
+```typescript
+// SessionWindow exposes this via useImperativeHandle + forwardRef
+interface SessionWindowHandle {
+  injectMessage(content: string): Promise<void>;
+  // Adds a user message to the session, then triggers backend.sendMessage()
+  // exactly as if the user typed and submitted it.
+  // Sets isStreaming=true, creates/reuses backendSessionId, etc.
+}
+
+// In CanvasView/App.tsx, session refs are stored in a Map:
+const sessionRefs = useRef<Map<string, SessionWindowHandle>>(new Map());
+
+// Controller calls:
+sessionRefs.current.get(generatorSessionId)?.injectMessage(promptContent);
+```
+
+This avoids duplicating SessionWindow's internal state machine. The Controller delegates message sending to the component that owns the streaming state.
+
+### Completion Detection
+
+The Controller registers a **global** `message.complete` listener via `backend.on('message.complete', ...)` in App.tsx. It maps backend `session_id` (claudeSessionId/codexThreadId) back to frontend Session.id using a lookup map derived from the sessions array. When a session in a running HarnessGroup completes, `onSessionComplete` fires to advance the pipeline.
 
 ### Pipeline Flow
 
@@ -137,12 +208,16 @@ interface HarnessController {
 When a Planner connects to multiple Generators:
 - Controller sends plan.md to all Generators simultaneously
 - Each Generator produces independent output (`result-genA.md`, `result-genB.md`)
-- Controller waits for ALL Generators to complete before triggering Evaluator
+- Controller uses a **completion counter** per group: `pendingGenerators: Set<string>` tracks which generators are still running. Each `onSessionComplete` removes from the set. When the set is empty, Evaluator is triggered.
+- If a Generator errors while others are still running: mark that generator as failed, continue waiting for others. When all resolve (complete or failed), trigger Evaluator with available results and note which generators failed.
 - Evaluator receives all results for unified or per-generator evaluation
 
-### Completion Detection
+### Sprint Lifecycle
 
-Leverages existing `message.complete` backend event. When an assistant message finishes streaming, Controller's `onSessionComplete` fires.
+- **Sprint 1** starts automatically when the user triggers the pipeline
+- A new sprint is triggered **manually by the user** (e.g., sending a new requirement to the Planner)
+- Sprints are sequential, never concurrent within the same group
+- Each sprint resets `currentRound` to 0
 
 ---
 
@@ -192,7 +267,27 @@ When a HarnessGroup is selected, a control bar appears at canvas bottom:
 
 ### File Operations
 
+File I/O requires new IPC methods in the Electron backend, since `backend.writeFile` / `backend.readFile` do not currently exist:
+
+**New IPC channels (added to preload.ts and main process):**
+
 ```typescript
+// preload.ts - expose to renderer
+'harness:write-file': (filePath: string, content: string) => Promise<void>
+'harness:read-file': (filePath: string) => Promise<string>
+'harness:mkdir': (dirPath: string) => Promise<void>
+```
+
+**Main process handler** uses Node.js `fs.promises` (mkdir with `{ recursive: true }`, writeFile with utf-8, readFile with utf-8).
+
+**Frontend wrapper** in `src/services/harnessFiles.ts`:
+
+```typescript
+// Sanitize groupId to prevent path traversal (alphanumeric + hyphens only)
+function sanitizeGroupId(groupId: string): string {
+  return groupId.replace(/[^a-zA-Z0-9-]/g, '');
+}
+
 async function writeHarnessFile(
   projectDir: string,
   groupId: string,
@@ -200,10 +295,11 @@ async function writeHarnessFile(
   filename: string,
   content: string
 ): Promise<string> {
-  const dir = `${projectDir}/.harness/${groupId}/sprint-${sprint}`;
-  await backend.exec(`mkdir -p ${dir}`);
+  const safeGroupId = sanitizeGroupId(groupId);
+  const dir = `${projectDir}/.harness/${safeGroupId}/sprint-${sprint}`;
+  await window.aiBackend.invoke('harness:mkdir', dir);
   const filePath = `${dir}/${filename}`;
-  await backend.writeFile(filePath, content);
+  await window.aiBackend.invoke('harness:write-file', filePath, content);
   return filePath;
 }
 
@@ -213,10 +309,13 @@ async function readHarnessFile(
   sprint: number,
   filename: string
 ): Promise<string> {
-  const filePath = `${projectDir}/.harness/${groupId}/sprint-${sprint}/${filename}`;
-  return await backend.readFile(filePath);
+  const safeGroupId = sanitizeGroupId(groupId);
+  const filePath = `${projectDir}/.harness/${safeGroupId}/sprint-${sprint}/${filename}`;
+  return await window.aiBackend.invoke('harness:read-file', filePath);
 }
 ```
+
+**Non-Electron fallback:** In browser-only mode (no Electron), file operations are mocked — files are stored in-memory using a `Map<string, string>` and logged to console. This enables development and demo without Electron.
 
 ### Prompt Templates
 
@@ -299,7 +398,22 @@ Controller scans Evaluator output for `VERDICT: PASS` or `VERDICT: FAIL`. If unp
 |----------|----------|
 | User manually messages Generator during pipeline | Pause pipeline, wait for manual operation to complete, allow resume |
 | User edits connections during pipeline run | Block connection edits on running groups; must pause first |
-| Multiple Generators finish at different times | Controller waits for ALL Generators to complete before triggering Evaluator |
+| Multiple Generators finish at different times | Controller uses pendingGenerators Set; triggers Evaluator when set is empty |
+
+### Pause/Resume/Stop Semantics
+
+- **Pause**: Controller stops dispatching new steps. In-flight AI responses are allowed to complete naturally (not interrupted). On completion, Controller does NOT advance the pipeline; it stores the pending next step.
+- **Resume**: Controller picks up from the stored pending step and continues the pipeline.
+- **Stop**: Like pause, but also resets `currentRound` to 0 and marks group as `idle`. Any pending state is discarded. In-flight responses still complete but results are ignored by the Controller.
+- **Persistence**: Pause/stop state is saved to DB. On app restart, paused groups remain paused; stopped groups are idle.
+
+### Connection Deletion Cascade
+
+When a session is deleted:
+- All `HarnessConnection` entries referencing that session are removed
+- If the deleted session was the group's only Planner, the entire group is dissolved (marked `idle`, connections cleared, user notified)
+- If it was one of multiple Generators, the group remains valid with remaining Generators
+- If a pipeline is running, it is stopped first
 
 ### Persistence
 
@@ -337,11 +451,15 @@ Controller scans Evaluator output for `VERDICT: PASS` or `VERDICT: FAIL`. If unp
 | File | Action | Purpose |
 |------|--------|---------|
 | `src/types.ts` | Modify | Add HarnessRole, HarnessConnection, HarnessGroup types; extend Session |
-| `src/services/harnessController.ts` | Create | Core controller logic: connections, pipeline, file I/O |
+| `src/services/harnessController.ts` | Create | useHarnessController hook: connections, pipeline, completion detection |
+| `src/services/harnessFiles.ts` | Create | File I/O wrapper with sanitization and non-Electron fallback |
 | `src/services/harnessPrompts.ts` | Create | Prompt templates for Generator/Evaluator |
 | `src/components/CanvasView.tsx` | Modify | Add connection anchors, drag-to-connect, line rendering |
 | `src/components/HarnessControlBar.tsx` | Create | Pipeline control UI |
 | `src/components/ConnectionLine.tsx` | Create | SVG connection line component |
 | `src/components/RoleBadge.tsx` | Create | Session role badge component |
 | `src/components/RolePickerModal.tsx` | Create | Role assignment popup on connection |
-| `src/App.tsx` | Modify | Integrate HarnessController state, pass to views |
+| `src/components/SessionWindow.tsx` | Modify | Add forwardRef + useImperativeHandle for injectMessage |
+| `src/App.tsx` | Modify | Integrate useHarnessController hook, sessionRefs map, pass to views |
+| `electron/preload.ts` | Modify | Add harness:write-file, harness:read-file, harness:mkdir IPC channels |
+| `electron/main.ts` | Modify | Add IPC handlers for harness file operations |
