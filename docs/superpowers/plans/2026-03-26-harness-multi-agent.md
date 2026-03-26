@@ -74,6 +74,9 @@ export interface HarnessGroup {
 export interface HarnessRunState {
   pendingGenerators: string[];    // string[] (not Set) for serializability
   pendingStep: 'generator' | 'evaluator' | null;
+  // Stores completedSessionId when advancePipeline is blocked by paused status.
+  // On resume, this is replayed to continue the pipeline.
+  deferredCompletion?: string | null;
 }
 
 export interface DbHarnessGroup {
@@ -516,7 +519,7 @@ export function useHarnessController(
 
   const getRunState = (groupId: string): HarnessRunState => {
     if (!runStateRef.current.has(groupId)) {
-      runStateRef.current.set(groupId, { pendingGenerators: [], pendingStep: null });
+      runStateRef.current.set(groupId, { pendingGenerators: [], pendingStep: null, deferredCompletion: null });
     }
     return runStateRef.current.get(groupId)!;
   };
@@ -651,7 +654,14 @@ export function useHarnessController(
 
   const advancePipeline = useCallback(async (groupId: string, completedSessionId: string) => {
     const group = groupsRef.current.find(g => g.id === groupId);
-    if (!group || group.status !== 'running' || !projectDir) return;
+    if (!group || !projectDir) return;
+
+    // If paused, store the completion for replay on resume
+    if (group.status === 'paused') {
+      setRunState(groupId, { deferredCompletion: completedSessionId });
+      return;
+    }
+    if (group.status !== 'running') return;
 
     const planners = getSessionsByRole(group, 'planner');
     const generators = getSessionsByRole(group, 'generator');
@@ -829,19 +839,17 @@ export function useHarnessController(
 
     updateGroup(groupId, { status: 'running' });
 
-    // Re-dispatch the pending step if one was stored before pause
+    // Replay deferred completion if a session finished while paused
     const runState = getRunState(groupId);
-    if (runState.pendingStep && projectDir) {
-      const generators = getSessionsByRole(group, 'generator');
-      const evaluators = getSessionsByRole(group, 'evaluator');
-
-      // Re-trigger based on pending step
-      // The pipeline was paused mid-flight; in-flight responses completed
-      // but advancePipeline was blocked. Now we re-check if any step needs dispatch.
-      // Since advancePipeline guards on status === 'running', it will now process
-      // any message.complete events that arrive after resume.
+    if (runState.deferredCompletion) {
+      const deferredId = runState.deferredCompletion;
+      setRunState(groupId, { deferredCompletion: null });
+      // Use setTimeout to ensure the state update (status: 'running') has been applied
+      setTimeout(() => advancePipeline(groupId, deferredId), 100);
     }
-  }, [updateGroup, projectDir, getSessionsByRole]);
+    // If no deferred completion, in-flight responses will trigger advancePipeline
+    // via the normal message.complete listener (which now passes the running check).
+  }, [updateGroup, advancePipeline]);
 
   const stopPipeline = useCallback((groupId: string) => {
     clearRunState(groupId);
