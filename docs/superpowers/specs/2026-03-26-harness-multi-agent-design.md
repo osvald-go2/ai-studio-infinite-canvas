@@ -75,7 +75,7 @@ HarnessGroup and HarnessConnection are stored as a JSON blob in a new `harness_g
 ```typescript
 interface DbHarnessGroup {
   id: string;                    // PRIMARY KEY
-  project_id: string;            // FOREIGN KEY -> projects.id
+  project_id: number;            // FOREIGN KEY -> projects.id (number, consistent with DbProject.id)
   name: string;
   connections_json: string;      // JSON-serialized HarnessConnection[]
   max_retries: number;
@@ -176,6 +176,8 @@ This avoids duplicating SessionWindow's internal state machine. The Controller d
 
 The Controller registers a **global** `message.complete` listener via `backend.on('message.complete', ...)` in App.tsx. It maps backend `session_id` (claudeSessionId/codexThreadId) back to frontend Session.id using a lookup map derived from the sessions array. When a session in a running HarnessGroup completes, `onSessionComplete` fires to advance the pipeline.
 
+**Note:** This listener coexists with per-SessionWindow `message.complete` listeners (which handle UI updates). Both fire for the same event. The Controller's listener must filter to only harness-enrolled sessions (those with `harnessGroupId` in a running group) to avoid unnecessary processing.
+
 ### Pipeline Flow
 
 ```
@@ -269,16 +271,27 @@ When a HarnessGroup is selected, a control bar appears at canvas bottom:
 
 File I/O requires new IPC methods in the Electron backend, since `backend.writeFile` / `backend.readFile` do not currently exist:
 
-**New IPC channels (added to preload.ts and main process):**
+**New dedicated IPC handlers** registered directly on `ipcMain.handle(...)` in `electron/main.ts` (NOT routed through `sidecar:invoke`, since these are local filesystem operations handled by the main process, same pattern as `pty:spawn`, `dialog:openDirectory`, `scan-skills`):
 
 ```typescript
-// preload.ts - expose to renderer
-'harness:write-file': (filePath: string, content: string) => Promise<void>
-'harness:read-file': (filePath: string) => Promise<string>
-'harness:mkdir': (dirPath: string) => Promise<void>
-```
+// electron/main.ts - register dedicated handlers
+ipcMain.handle('harness:write-file', async (_, filePath: string, content: string) => {
+  await fs.promises.writeFile(filePath, content, 'utf-8');
+});
+ipcMain.handle('harness:read-file', async (_, filePath: string) => {
+  return await fs.promises.readFile(filePath, 'utf-8');
+});
+ipcMain.handle('harness:mkdir', async (_, dirPath: string) => {
+  await fs.promises.mkdir(dirPath, { recursive: true });
+});
 
-**Main process handler** uses Node.js `fs.promises` (mkdir with `{ recursive: true }`, writeFile with utf-8, readFile with utf-8).
+// preload.ts - expose dedicated methods (not through generic invoke)
+harness: {
+  writeFile: (filePath: string, content: string) => ipcRenderer.invoke('harness:write-file', filePath, content),
+  readFile: (filePath: string) => ipcRenderer.invoke('harness:read-file', filePath),
+  mkdir: (dirPath: string) => ipcRenderer.invoke('harness:mkdir', dirPath),
+}
+```
 
 **Frontend wrapper** in `src/services/harnessFiles.ts`:
 
@@ -286,6 +299,16 @@ File I/O requires new IPC methods in the Electron backend, since `backend.writeF
 // Sanitize groupId to prevent path traversal (alphanumeric + hyphens only)
 function sanitizeGroupId(groupId: string): string {
   return groupId.replace(/[^a-zA-Z0-9-]/g, '');
+}
+
+// Whitelist allowed filenames to prevent path traversal via filename parameter
+const ALLOWED_FILENAMES = /^(plan|result(-\d+)?|review-\d+)\.md$/;
+
+function validateFilename(filename: string): string {
+  if (!ALLOWED_FILENAMES.test(filename)) {
+    throw new Error(`Invalid harness filename: ${filename}`);
+  }
+  return filename;
 }
 
 async function writeHarnessFile(
@@ -296,10 +319,11 @@ async function writeHarnessFile(
   content: string
 ): Promise<string> {
   const safeGroupId = sanitizeGroupId(groupId);
+  const safeFilename = validateFilename(filename);
   const dir = `${projectDir}/.harness/${safeGroupId}/sprint-${sprint}`;
-  await window.aiBackend.invoke('harness:mkdir', dir);
-  const filePath = `${dir}/${filename}`;
-  await window.aiBackend.invoke('harness:write-file', filePath, content);
+  await window.aiBackend.harness.mkdir(dir);
+  const filePath = `${dir}/${safeFilename}`;
+  await window.aiBackend.harness.writeFile(filePath, content);
   return filePath;
 }
 
@@ -310,8 +334,9 @@ async function readHarnessFile(
   filename: string
 ): Promise<string> {
   const safeGroupId = sanitizeGroupId(groupId);
-  const filePath = `${projectDir}/.harness/${safeGroupId}/sprint-${sprint}/${filename}`;
-  return await window.aiBackend.invoke('harness:read-file', filePath);
+  const safeFilename = validateFilename(filename);
+  const filePath = `${projectDir}/.harness/${safeGroupId}/sprint-${sprint}/${safeFilename}`;
+  return await window.aiBackend.harness.readFile(filePath);
 }
 ```
 
