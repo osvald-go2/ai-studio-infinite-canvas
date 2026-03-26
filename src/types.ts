@@ -61,6 +61,58 @@ export interface Session {
   prevHeight?: number;
   claudeSessionId?: string;
   codexThreadId?: string;
+  harnessRole?: HarnessRole;
+  harnessGroupId?: string;
+}
+
+// Harness Multi-Agent Types
+export type HarnessRole = 'planner' | 'generator' | 'evaluator';
+
+export type HarnessGroupStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
+
+export interface HarnessConnection {
+  id: string;
+  fromSessionId: string;
+  toSessionId: string;
+  fromRole: HarnessRole;
+  toRole: HarnessRole;
+}
+
+export interface HarnessGroup {
+  id: string;
+  name: string;
+  connections: HarnessConnection[];
+  maxRetries: number;
+  status: HarnessGroupStatus;
+  currentSprint: number;
+  currentRound: number;
+  harnessDir: string;
+}
+
+// Runtime-only pipeline state, not persisted to DB.
+// Held in a separate Map inside useHarnessController, keyed by group ID.
+export interface HarnessRunState {
+  pendingGenerators: string[];
+  pendingStep: 'generator' | 'evaluator' | null;
+  deferredCompletion?: string | null;
+}
+
+export interface DbHarnessGroup {
+  id: string;
+  project_id: number;
+  name: string;
+  connections_json: string;
+  max_retries: number;
+  status: string;
+  current_sprint: number;
+  current_round: number;
+  harness_dir: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SessionWindowHandle {
+  injectMessage(content: string): Promise<void>;
 }
 
 export interface DbProject {
