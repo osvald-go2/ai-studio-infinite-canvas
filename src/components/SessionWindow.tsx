@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { X, Clock, Plus, MessageSquare, Send, Copy, ThumbsUp, ThumbsDown, ArrowUp, Square, Minus, Check, Pencil, RotateCcw, GitBranch, GitFork, Trash2, ChevronDown, Loader2 } from 'lucide-react';
 import { Session, Message, ContentBlock, SkillInfo } from '../types';
+import type { SessionWindowHandle } from '../types';
 import { MessageRenderer } from './message/MessageRenderer';
 import { STRUCTURED_MOCK_RESPONSES } from '../utils/mockResponses';
 import { backend } from '../services/backend';
@@ -16,20 +17,7 @@ function isElectron(): boolean {
 }
 let mockResponseIndex = 0;
 
-export function SessionWindow({
-  session,
-  onUpdate,
-  onClose,
-  onDelete,
-  fullScreen = false,
-  height,
-  animateHeight = false,
-  onHeaderDoubleClick,
-  variant = 'default',
-  projectDir,
-  onToggleGitPanel,
-  onCopySession
-}: {
+type SessionWindowProps = {
   session: Session,
   onUpdate: (s: Session) => void,
   onClose?: () => void,
@@ -42,7 +30,22 @@ export function SessionWindow({
   projectDir?: string | null,
   onToggleGitPanel?: () => void,
   onCopySession?: (title: string) => void
-}) {
+};
+
+export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>(function SessionWindow({
+  session,
+  onUpdate,
+  onClose,
+  onDelete,
+  fullScreen = false,
+  height,
+  animateHeight = false,
+  onHeaderDoubleClick,
+  variant = 'default',
+  projectDir,
+  onToggleGitPanel,
+  onCopySession
+}, ref) {
   const [inputValue, setInputValue] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
@@ -630,6 +633,16 @@ export function SessionWindow({
       });
     }
   };
+
+  // Ref to latest sendMessage for stable imperative handle
+  const sendMessageRef = useRef(sendMessage);
+  sendMessageRef.current = sendMessage;
+
+  useImperativeHandle(ref, () => ({
+    async injectMessage(content: string) {
+      await sendMessageRef.current(content);
+    }
+  }), []);
 
   const handleSend = async () => {
     if (!inputValue.trim() || isStreaming) return;
@@ -1376,7 +1389,7 @@ export function SessionWindow({
       </div>}
     </div>
   );
-}
+});
 
 /** Check if a message has any visible content (excluding system status blocks) */
 function hasVisibleContent(msg: Message): boolean {
