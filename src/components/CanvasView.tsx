@@ -399,10 +399,42 @@ export function CanvasView({
               const fromSession = sessions.find(s => s.id === conn.fromSessionId);
               const toSession = sessions.find(s => s.id === conn.toSessionId);
               if (!fromSession || !toSession) return null;
-              const fromX = fromSession.position.x + (fromSession.width || 380) / 2;
-              const fromY = fromSession.position.y + (fromSession.height || 300) / 2;
-              const toX = toSession.position.x + (toSession.width || 380) / 2;
-              const toY = toSession.position.y + (toSession.height || 300) / 2;
+
+              // Calculate edge connection points (not center)
+              const fw = fromSession.width || 380;
+              const fh = fromSession.height || 300;
+              const tw = toSession.width || 380;
+              const th = toSession.height || 300;
+              const fcx = fromSession.position.x + fw / 2;
+              const fcy = fromSession.position.y + fh / 2;
+              const tcx = toSession.position.x + tw / 2;
+              const tcy = toSession.position.y + th / 2;
+
+              // Determine which edge to connect from/to based on relative position
+              const dx = tcx - fcx;
+              const dy = tcy - fcy;
+              let fromX: number, fromY: number, toX: number, toY: number;
+
+              if (Math.abs(dx) > Math.abs(dy)) {
+                // Horizontal: connect right→left or left→right
+                if (dx > 0) {
+                  fromX = fromSession.position.x + fw; fromY = fcy;
+                  toX = toSession.position.x; toY = tcy;
+                } else {
+                  fromX = fromSession.position.x; fromY = fcy;
+                  toX = toSession.position.x + tw; toY = tcy;
+                }
+              } else {
+                // Vertical: connect bottom→top or top→bottom
+                if (dy > 0) {
+                  fromX = fcx; fromY = fromSession.position.y + fh;
+                  toX = tcx; toY = toSession.position.y;
+                } else {
+                  fromX = fcx; fromY = fromSession.position.y;
+                  toX = tcx; toY = toSession.position.y + th;
+                }
+              }
+
               const group = harness.groups.find(g => g.connections.some(c => c.id === conn.id));
               return (
                 <ConnectionLine key={conn.id} fromX={fromX} fromY={fromY} toX={toX} toY={toY}
@@ -1239,40 +1271,39 @@ function DraggableSession({
         ) : null;
       })()}
 
-      {/* Harness connection anchor (right side - drag source) */}
-      {harness && (
-        <div
-          className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 group z-20 cursor-crosshair"
-          style={{ width: 24, height: 24 }}
-          onMouseDown={(e) => {
-            e.stopPropagation();
-            onAnchorDragStart?.(
-              session.id,
-              session.position.x + (session.width || 380),
-              session.position.y + (session.height || 300) / 2
-            );
-          }}
-          onMouseUp={(e) => {
-            e.stopPropagation();
-            if (connectingFrom) {
-              onAnchorDragEnd?.(session.id);
-            }
-          }}
-        >
-          <div className="absolute inset-0 m-auto w-3 h-3 rounded-full bg-blue-500 border-2 border-blue-400 opacity-40 group-hover:opacity-100 transition-opacity shadow-lg shadow-blue-500/50" />
-        </div>
-      )}
-
-      {/* Harness connection anchor (left side - drop target, shown when connecting) */}
-      {harness && connectingFrom && connectingFrom.sessionId !== session.id && (
-        <div
-          className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-blue-500/40 border-2 border-blue-400 cursor-crosshair z-20 animate-pulse"
-          onMouseUp={(e) => {
-            e.stopPropagation();
-            onAnchorDragEnd?.(session.id);
-          }}
-        />
-      )}
+      {/* Harness connection anchors — 4 sides (top, right, bottom, left) */}
+      {harness && (() => {
+        const w = session.width || 380;
+        const h = currentHeight;
+        const anchors = [
+          { id: 'top',    cls: 'top-0 left-1/2 -translate-x-1/2 -translate-y-1/2', ax: session.position.x + w / 2, ay: session.position.y },
+          { id: 'right',  cls: 'right-0 top-1/2 -translate-y-1/2 translate-x-1/2', ax: session.position.x + w, ay: session.position.y + h / 2 },
+          { id: 'bottom', cls: 'bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2', ax: session.position.x + w / 2, ay: session.position.y + h },
+          { id: 'left',   cls: 'left-0 top-1/2 -translate-y-1/2 -translate-x-1/2', ax: session.position.x, ay: session.position.y + h / 2 },
+        ];
+        const isTarget = connectingFrom && connectingFrom.sessionId !== session.id;
+        return anchors.map(a => (
+          <div
+            key={a.id}
+            className={`absolute ${a.cls} group z-20 cursor-crosshair`}
+            style={{ width: 20, height: 20 }}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              onAnchorDragStart?.(session.id, a.ax, a.ay);
+            }}
+            onMouseUp={(e) => {
+              e.stopPropagation();
+              if (connectingFrom) onAnchorDragEnd?.(session.id);
+            }}
+          >
+            <div className={`absolute inset-0 m-auto w-2.5 h-2.5 rounded-full border-2 transition-all ${
+              isTarget
+                ? 'bg-blue-500/50 border-blue-400 opacity-100 scale-125 animate-pulse'
+                : 'bg-blue-500 border-blue-400 opacity-0 group-hover:opacity-80'
+            }`} />
+          </div>
+        ));
+      })()}
     </div>
   );
 }
