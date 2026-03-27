@@ -449,6 +449,7 @@ export function CanvasView({
             connectingFrom={connectingFrom}
             onAnchorDragStart={handleAnchorDragStart}
             onAnchorDragEnd={handleAnchorDragEnd}
+            sessionRefs={sessionRefs}
           />
         ))}
 
@@ -927,6 +928,7 @@ function DraggableSession({
   connectingFrom,
   onAnchorDragStart,
   onAnchorDragEnd,
+  sessionRefs,
 }: {
   session: Session,
   transformScale: number,
@@ -948,6 +950,7 @@ function DraggableSession({
   connectingFrom?: { sessionId: string; x: number; y: number } | null,
   onAnchorDragStart?: (sessionId: string, anchorX: number, anchorY: number) => void,
   onAnchorDragEnd?: (targetSessionId: string) => void,
+  sessionRefs?: React.RefObject<Map<string, SessionWindowHandle>>,
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
@@ -1186,6 +1189,13 @@ function DraggableSession({
       onMouseDown={handleMouseDown}
     >
       <SessionWindow
+        ref={(handle) => {
+          if (handle) {
+            sessionRefs?.current?.set(session.id, handle);
+          } else {
+            sessionRefs?.current?.delete(session.id);
+          }
+        }}
         session={session}
         onUpdate={updateSession}
         onDelete={onDelete}

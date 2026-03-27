@@ -15,6 +15,8 @@ import { TerminalPanel } from './components/terminal/TerminalPanel';
 import { GitProvider } from './contexts/GitProvider';
 import { HomePage } from './components/HomePage';
 import { Session, SessionStatus, Message, DbProject, DbSession } from './types';
+import type { SessionWindowHandle } from './types';
+import { useHarnessController } from './services/harnessController';
 import { backend } from './services/backend';
 import { gitService } from './services/git';
 import { initialSessions } from './data';
@@ -147,7 +149,10 @@ export default function App() {
   const sessionCreatedAtRef = useRef<Record<string, string>>({});
   const loadedSessionIdsRef = useRef<Set<string>>(new Set());
   const canvasWidthRef = useRef(window.innerWidth);
+  const sessionRefs = useRef<Map<string, SessionWindowHandle>>(new Map());
   const isElectronApp = typeof window !== 'undefined' && (window as any).aiBackend !== undefined;
+
+  const harness = useHarnessController(sessions, setSessions, projectDir, sessionRefs);
 
   // Compute terminal cwd based on active session's worktree
   const activeSession = sessions.find(s => s.id === activeSessionId);
@@ -716,6 +721,8 @@ export default function App() {
                   onActiveSessionChange={(id) => setActiveSessionId(id)}
                   onClearFocus={() => setFocusedSessionId(null)}
                   onNewSession={() => setIsNewModalOpen(true)}
+                  harness={harness}
+                  sessionRefs={sessionRefs}
                 />
               ) : viewMode === 'board' ? (
                 <BoardView
