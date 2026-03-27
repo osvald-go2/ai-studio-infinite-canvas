@@ -749,8 +749,8 @@ export default function App() {
               )}
             </div>
 
-            {/* Git Panel — side panel */}
-            {projectDir && (
+            {/* Git Panel — side panel (only if git repo) */}
+            {projectDir && isGitRepo && (
               <GitPanel
                 isOpen={showGitPanel}
                 onClose={() => setShowGitPanel(false)}

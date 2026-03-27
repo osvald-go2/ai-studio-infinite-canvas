@@ -68,7 +68,7 @@ export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>
     }
   }, [])
 
-  const { info, changes } = useGit();
+  const { info, changes, isRepo } = useGit();
   const [worktreeAdditions, setWorktreeAdditions] = useState(0);
   const [worktreeDeletions, setWorktreeDeletions] = useState(0);
   const hasWorktree = session.worktree && session.worktree !== 'default';
@@ -1348,7 +1348,7 @@ export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>
                 )}
               </div>
 
-              {(totalAdditions > 0 || totalDeletions > 0) && (
+              {isRepo && (totalAdditions > 0 || totalDeletions > 0) && (
                 <button
                   onClick={onToggleGitPanel}
                   aria-label="View git changes"
@@ -1361,7 +1361,7 @@ export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>
               )}
 
               {/* Changes indicator */}
-              {session.status === 'review' && session.hasChanges && (
+              {isRepo && session.status === 'review' && session.hasChanges && (
                 <span className="flex items-center gap-1 bg-white/[0.06] px-2 py-1 rounded-lg text-[11px] font-mono border border-white/[0.06]">
                   <span className="text-amber-400">{session.changeCount ?? '~'} changes</span>
                 </span>
