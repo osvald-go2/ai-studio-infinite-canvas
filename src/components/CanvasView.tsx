@@ -400,11 +400,11 @@ export function CanvasView({
               const toSession = sessions.find(s => s.id === conn.toSessionId);
               if (!fromSession || !toSession) return null;
 
-              // Calculate edge connection points (not center)
-              const fw = fromSession.width || 380;
-              const fh = fromSession.height || 300;
-              const tw = toSession.width || 380;
-              const th = toSession.height || 300;
+              // Calculate edge connection points using actual constants
+              const fw = fromSession.width ?? SESSION_WIDTH;
+              const fh = fromSession.height ?? SESSION_DEFAULT_HEIGHT;
+              const tw = toSession.width ?? SESSION_WIDTH;
+              const th = toSession.height ?? SESSION_DEFAULT_HEIGHT;
               const fcx = fromSession.position.x + fw / 2;
               const fcy = fromSession.position.y + fh / 2;
               const tcx = toSession.position.x + tw / 2;
@@ -1273,7 +1273,7 @@ function DraggableSession({
 
       {/* Harness connection anchors — 4 sides (top, right, bottom, left) */}
       {harness && (() => {
-        const w = session.width || 380;
+        const w = session.width ?? SESSION_WIDTH;
         const h = currentHeight;
         const anchors = [
           { id: 'top',    cls: 'top-0 left-1/2 -translate-x-1/2 -translate-y-1/2', ax: session.position.x + w / 2, ay: session.position.y },
@@ -1286,7 +1286,7 @@ function DraggableSession({
           <div
             key={a.id}
             className={`absolute ${a.cls} group z-20 cursor-crosshair`}
-            style={{ width: 20, height: 20 }}
+            style={{ width: 32, height: 32 }}
             onMouseDown={(e) => {
               e.stopPropagation();
               onAnchorDragStart?.(session.id, a.ax, a.ay);
@@ -1296,10 +1296,10 @@ function DraggableSession({
               if (connectingFrom) onAnchorDragEnd?.(session.id);
             }}
           >
-            <div className={`absolute inset-0 m-auto w-2.5 h-2.5 rounded-full border-2 transition-all ${
+            <div className={`absolute inset-0 m-auto rounded-full border-2 transition-all duration-200 ${
               isTarget
-                ? 'bg-blue-500/50 border-blue-400 opacity-100 scale-125 animate-pulse'
-                : 'bg-blue-500 border-blue-400 opacity-0 group-hover:opacity-80'
+                ? 'w-5 h-5 bg-blue-500/60 border-blue-400 opacity-100 animate-pulse shadow-lg shadow-blue-500/50'
+                : 'w-3.5 h-3.5 bg-blue-500/80 border-blue-300 opacity-0 group-hover:opacity-100 shadow-md shadow-blue-500/30'
             }`} />
           </div>
         ));
