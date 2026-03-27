@@ -4,6 +4,12 @@ import { SessionWindow } from './SessionWindow';
 import { ZoomIn, ZoomOut, Maximize, Hand, MousePointer2, Send, Map, LayoutGrid, Plus, Mic, ArrowUp, Settings2 } from 'lucide-react';
 import { SESSION_WIDTH, SESSION_MIN_WIDTH, SESSION_MAX_WIDTH, SESSION_DEFAULT_HEIGHT, SESSION_MIN_HEIGHT, SESSION_GAP, START_X, START_Y } from '@/constants';
 import { getAgentType } from '../models';
+import { ConnectionLine } from './harness/ConnectionLine';
+import { RoleBadge } from './harness/RoleBadge';
+import { RolePickerModal } from './harness/RolePickerModal';
+import { HarnessControlBar } from './harness/HarnessControlBar';
+import type { HarnessRole, SessionWindowHandle } from '../types';
+import type { UseHarnessController } from '../services/harnessController';
 
 export function CanvasView({
   sessions,
@@ -18,6 +24,8 @@ export function CanvasView({
   onActiveSessionChange,
   onClearFocus,
   onNewSession,
+  harness,
+  sessionRefs,
 }: {
   sessions: Session[],
   setSessions: any,
@@ -31,6 +39,8 @@ export function CanvasView({
   onActiveSessionChange?: (id: string | null) => void,
   onClearFocus?: () => void,
   onNewSession?: () => void,
+  harness?: UseHarnessController,
+  sessionRefs?: React.RefObject<Map<string, SessionWindowHandle>>,
 }) {
   const setTransform = onTransformChange;
   const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
@@ -46,6 +56,12 @@ export function CanvasView({
   const [isArranging, setIsArranging] = useState(false);
   const arrangingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+
+  // Harness connection state
+  const [connectingFrom, setConnectingFrom] = useState<{ sessionId: string; x: number; y: number } | null>(null);
+  const [connectingMouse, setConnectingMouse] = useState<{ x: number; y: number } | null>(null);
+  const [pendingConnection, setPendingConnection] = useState<{ fromId: string; toId: string } | null>(null);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
 
   // Notify parent of active session changes
   useEffect(() => {
@@ -195,6 +211,16 @@ export function CanvasView({
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    // Harness connection dragging
+    if (connectingFrom) {
+      const canvasRect = containerRef.current?.getBoundingClientRect();
+      if (canvasRect) {
+        const x = (e.clientX - canvasRect.left - transform.x) / transform.scale;
+        const y = (e.clientY - canvasRect.top - transform.y) / transform.scale;
+        setConnectingMouse({ x, y });
+      }
+    }
+
     if (toolMode === 'hand' && isDraggingCanvas) {
       const dx = e.clientX - lastPos.x;
       const dy = e.clientY - lastPos.y;
@@ -204,14 +230,14 @@ export function CanvasView({
       const rect = containerRef.current!.getBoundingClientRect();
       const x = (e.clientX - rect.left - transform.x) / transform.scale;
       const y = (e.clientY - rect.top - transform.y) / transform.scale;
-      
+
       setSelectionBox(prev => ({ ...prev!, currentX: x, currentY: y }));
-      
+
       const minX = Math.min(selectionBox.startX, x);
       const maxX = Math.max(selectionBox.startX, x);
       const minY = Math.min(selectionBox.startY, y);
       const maxY = Math.max(selectionBox.startY, y);
-      
+
       const newSelectedIds = sessions.filter(session => {
         const sessionWidth = session.width ?? SESSION_WIDTH;
         const sessionHeight = session.height ?? SESSION_DEFAULT_HEIGHT;
@@ -219,15 +245,21 @@ export function CanvasView({
         const sMaxX = session.position.x + sessionWidth;
         const sMinY = session.position.y;
         const sMaxY = session.position.y + sessionHeight;
-        
+
         return sMinX < maxX && sMaxX > minX && sMinY < maxY && sMaxY > minY;
       }).map(s => s.id);
-      
+
       setSelectedSessionIds(newSelectedIds);
     }
   };
 
   const handleMouseUp = () => {
+    // Cancel harness connection if dragging on empty canvas
+    if (connectingFrom) {
+      setConnectingFrom(null);
+      setConnectingMouse(null);
+    }
+
     if (toolMode === 'hand') {
       setIsDraggingCanvas(false);
     } else if (toolMode === 'select') {
@@ -313,6 +345,30 @@ export function CanvasView({
     setIsArranging(false);
   }, []);
 
+  // Harness connection handlers
+  const handleAnchorDragStart = useCallback((sessionId: string, anchorX: number, anchorY: number) => {
+    setConnectingFrom({ sessionId, x: anchorX, y: anchorY });
+  }, []);
+
+  const handleAnchorDragEnd = useCallback((targetSessionId: string) => {
+    if (connectingFrom && connectingFrom.sessionId !== targetSessionId) {
+      setPendingConnection({ fromId: connectingFrom.sessionId, toId: targetSessionId });
+    }
+    setConnectingFrom(null);
+    setConnectingMouse(null);
+  }, [connectingFrom]);
+
+  const handleConnectionConfirm = useCallback((fromRole: HarnessRole, toRole: HarnessRole, groupName: string) => {
+    if (!pendingConnection || !harness) return;
+    let group = harness.groups.find(g => g.name === groupName);
+    if (!group) {
+      group = harness.createGroup(groupName);
+    }
+    harness.addConnection(group.id, pendingConnection.fromId, pendingConnection.toId, fromRole, toRole);
+    setSelectedGroupId(group.id);
+    setPendingConnection(null);
+  }, [pendingConnection, harness]);
+
   return (
     <div 
       ref={containerRef}
@@ -336,6 +392,30 @@ export function CanvasView({
           }
         }}
       >
+        {/* Harness connection lines */}
+        {harness && (
+          <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ overflow: 'visible' }}>
+            {harness.getAllConnections().map(conn => {
+              const fromSession = sessions.find(s => s.id === conn.fromSessionId);
+              const toSession = sessions.find(s => s.id === conn.toSessionId);
+              if (!fromSession || !toSession) return null;
+              const fromX = fromSession.position.x + (fromSession.width || 380) / 2;
+              const fromY = fromSession.position.y + (fromSession.height || 300) / 2;
+              const toX = toSession.position.x + (toSession.width || 380) / 2;
+              const toY = toSession.position.y + (toSession.height || 300) / 2;
+              const group = harness.groups.find(g => g.connections.some(c => c.id === conn.id));
+              return (
+                <ConnectionLine key={conn.id} fromX={fromX} fromY={fromY} toX={toX} toY={toY}
+                  fromRole={conn.fromRole} toRole={conn.toRole} groupStatus={group?.status || 'idle'} />
+              );
+            })}
+            {connectingFrom && connectingMouse && (
+              <line x1={connectingFrom.x} y1={connectingFrom.y} x2={connectingMouse.x} y2={connectingMouse.y}
+                stroke="#6b7280" strokeWidth={2} strokeDasharray="4 4" opacity={0.6} />
+            )}
+          </svg>
+        )}
+
         {sessions.map(session => (
           <DraggableSession
             key={session.id}
@@ -365,6 +445,10 @@ export function CanvasView({
             onCopySession={onCopySession}
             isArranging={isArranging}
             onArrangeCancel={handleArrangeCancel}
+            harness={harness}
+            connectingFrom={connectingFrom}
+            onAnchorDragStart={handleAnchorDragStart}
+            onAnchorDragEnd={handleAnchorDragEnd}
           />
         ))}
 
@@ -562,6 +646,30 @@ export function CanvasView({
             </button>
           </div>
         </>
+      )}
+
+      {/* Harness Control Bar */}
+      {harness && selectedGroupId && (() => {
+        const group = harness.groups.find(g => g.id === selectedGroupId);
+        if (!group) return null;
+        return (
+          <HarnessControlBar group={group}
+            onStart={() => harness.startPipeline(group.id)}
+            onPause={() => harness.pausePipeline(group.id)}
+            onResume={() => harness.resumePipeline(group.id)}
+            onStop={() => harness.stopPipeline(group.id)} />
+        );
+      })()}
+
+      {/* Role Picker Modal */}
+      {pendingConnection && (
+        <RolePickerModal
+          fromSessionTitle={sessions.find(s => s.id === pendingConnection.fromId)?.title || ''}
+          toSessionTitle={sessions.find(s => s.id === pendingConnection.toId)?.title || ''}
+          onConfirm={handleConnectionConfirm}
+          onCancel={() => setPendingConnection(null)}
+          existingGroupNames={harness?.groups.map(g => g.name) || []}
+        />
       )}
     </div>
   );
@@ -815,6 +923,10 @@ function DraggableSession({
   onCopySession,
   isArranging,
   onArrangeCancel,
+  harness,
+  connectingFrom,
+  onAnchorDragStart,
+  onAnchorDragEnd,
 }: {
   session: Session,
   transformScale: number,
@@ -832,6 +944,10 @@ function DraggableSession({
   onCopySession?: (title: string) => void,
   isArranging?: boolean,
   onArrangeCancel?: () => void,
+  harness?: UseHarnessController,
+  connectingFrom?: { sessionId: string; x: number; y: number } | null,
+  onAnchorDragStart?: (sessionId: string, anchorX: number, anchorY: number) => void,
+  onAnchorDragEnd?: (targetSessionId: string) => void,
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
@@ -1101,6 +1217,48 @@ function DraggableSession({
       >
         <div className="absolute right-0 top-1/2 -translate-y-1/2 w-0.5 h-12 rounded-full bg-white/0 group-hover:bg-white/30 transition-colors" />
       </div>
+
+      {/* Harness role badge */}
+      {harness && (() => {
+        const roleInfo = harness.getSessionRole(session.id);
+        return roleInfo ? (
+          <div className="absolute -top-2 -right-2 z-20">
+            <RoleBadge role={roleInfo.role} />
+          </div>
+        ) : null;
+      })()}
+
+      {/* Harness connection anchor (right side - drag source) */}
+      {harness && (
+        <div
+          className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-3 h-3 rounded-full bg-zinc-600 border border-zinc-500 opacity-0 hover:opacity-100 cursor-crosshair transition-opacity z-10"
+          onMouseDown={(e) => {
+            e.stopPropagation();
+            onAnchorDragStart?.(
+              session.id,
+              session.position.x + (session.width || 380),
+              session.position.y + (session.height || 300) / 2
+            );
+          }}
+          onMouseUp={(e) => {
+            e.stopPropagation();
+            if (connectingFrom) {
+              onAnchorDragEnd?.(session.id);
+            }
+          }}
+        />
+      )}
+
+      {/* Harness connection anchor (left side - drop target, shown when connecting) */}
+      {harness && connectingFrom && connectingFrom.sessionId !== session.id && (
+        <div
+          className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-blue-500/30 border-2 border-blue-400 cursor-crosshair z-10 animate-pulse"
+          onMouseUp={(e) => {
+            e.stopPropagation();
+            onAnchorDragEnd?.(session.id);
+          }}
+        />
+      )}
     </div>
   );
 }
