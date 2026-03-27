@@ -191,8 +191,12 @@ export function useHarnessController(
   }, [sessionRefs]);
 
   const advancePipeline = useCallback(async (groupId: string, completedSessionId: string) => {
+    console.log('[harness] advancePipeline called:', { groupId, completedSessionId });
     const group = groupsRef.current.find(g => g.id === groupId);
-    if (!group || !projectDir) return;
+    if (!group || !projectDir) {
+      console.log('[harness] advancePipeline bail: group=', !!group, 'projectDir=', projectDir);
+      return;
+    }
 
     // If paused, store the completion for replay on resume
     if (group.status === 'paused') {
@@ -307,13 +311,24 @@ export function useHarnessController(
 
   useEffect(() => {
     const handleComplete = (event: any) => {
+      console.log('[harness] message.complete event:', JSON.stringify(event));
+      console.log('[harness] groups:', groupsRef.current.map(g => ({ id: g.id, status: g.status, conns: g.connections.length })));
+      console.log('[harness] sessions with backend IDs:', sessionsRef.current.map(s => ({ id: s.id, claudeSessionId: s.claudeSessionId, codexThreadId: s.codexThreadId })));
+
       const backendSessionId = event?.session_id;
-      if (!backendSessionId) return;
+      if (!backendSessionId) {
+        console.log('[harness] no session_id in event, skipping');
+        return;
+      }
 
       const session = sessionsRef.current.find(
         s => s.claudeSessionId === backendSessionId || s.codexThreadId === backendSessionId
       );
-      if (!session) return;
+      if (!session) {
+        console.log('[harness] no matching frontend session for backend ID:', backendSessionId);
+        return;
+      }
+      console.log('[harness] matched session:', session.id, session.title);
 
       const group = groupsRef.current.find(
         g => (g.status === 'running' || g.status === 'paused') &&
@@ -321,13 +336,18 @@ export function useHarnessController(
             c => c.fromSessionId === session.id || c.toSessionId === session.id
           )
       );
-      if (!group) return;
+      if (!group) {
+        console.log('[harness] no running/paused group for session:', session.id);
+        return;
+      }
+      console.log('[harness] advancing pipeline for group:', group.id, 'session:', session.id);
 
       setTimeout(() => advancePipeline(group.id, session.id), 500);
     };
 
     if (typeof window !== 'undefined' && window.aiBackend) {
       window.aiBackend.on('message.complete', handleComplete);
+      console.log('[harness] registered message.complete listener');
     }
     return () => {
       if (typeof window !== 'undefined' && window.aiBackend) {

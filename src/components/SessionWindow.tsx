@@ -640,9 +640,10 @@ export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>
 
   useImperativeHandle(ref, () => ({
     async injectMessage(content: string) {
+      console.log('[harness] injectMessage called for session:', session.id, 'content length:', content.length);
       await sendMessageRef.current(content);
     }
-  }), []);
+  }), [session.id]);
 
   const handleSend = async () => {
     if (!inputValue.trim() || isStreaming) return;

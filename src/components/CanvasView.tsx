@@ -649,9 +649,10 @@ export function CanvasView({
         </>
       )}
 
-      {/* Harness Control Bar */}
-      {harness && selectedGroupId && (() => {
-        const group = harness.groups.find(g => g.id === selectedGroupId);
+      {/* Harness Control Bar — show for selected group, or first group if none selected */}
+      {harness && harness.groups.length > 0 && (() => {
+        const group = (selectedGroupId && harness.groups.find(g => g.id === selectedGroupId))
+          || harness.groups[0];
         if (!group) return null;
         return (
           <HarnessControlBar group={group}
