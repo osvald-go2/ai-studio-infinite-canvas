@@ -25,7 +25,8 @@ export function RolePickerModal({
 }: RolePickerModalProps) {
   const [fromRole, setFromRole] = useState<HarnessRole>('planner');
   const [toRole, setToRole] = useState<HarnessRole>('generator');
-  const [groupName, setGroupName] = useState('');
+  // Default to first existing group if available
+  const [groupName, setGroupName] = useState(existingGroupNames[0] || '');
 
   const handleConfirm = () => {
     const name = groupName.trim() || `harness-${Date.now().toString(36)}`;
@@ -42,15 +43,42 @@ export function RolePickerModal({
           </button>
         </div>
 
+        {/* Group selection: dropdown for existing, input for new */}
         <div className="mb-4">
-          <label className="block text-xs text-zinc-400 mb-1">Group Name</label>
-          <input
-            type="text"
-            value={groupName}
-            onChange={e => setGroupName(e.target.value)}
-            placeholder="e.g. feature-login"
-            className="w-full bg-zinc-800 border border-zinc-600 rounded px-3 py-1.5 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500"
-          />
+          {existingGroupNames.length > 0 ? (
+            <>
+              <label className="block text-xs text-zinc-400 mb-1">Group</label>
+              <select
+                value={groupName}
+                onChange={e => setGroupName(e.target.value)}
+                className="w-full bg-zinc-800 border border-zinc-600 rounded px-3 py-1.5 text-sm text-zinc-100 focus:outline-none focus:border-blue-500"
+              >
+                {existingGroupNames.map(n => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+                <option value="">+ New group</option>
+              </select>
+              {groupName === '' && (
+                <input
+                  type="text"
+                  onChange={e => setGroupName(e.target.value)}
+                  placeholder="New group name"
+                  className="w-full mt-2 bg-zinc-800 border border-zinc-600 rounded px-3 py-1.5 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500"
+                />
+              )}
+            </>
+          ) : (
+            <>
+              <label className="block text-xs text-zinc-400 mb-1">Group Name</label>
+              <input
+                type="text"
+                value={groupName}
+                onChange={e => setGroupName(e.target.value)}
+                placeholder="e.g. feature-login"
+                className="w-full bg-zinc-800 border border-zinc-600 rounded px-3 py-1.5 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500"
+              />
+            </>
+          )}
         </div>
 
         <div className="mb-3">

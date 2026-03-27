@@ -312,18 +312,17 @@ export function useHarnessController(
       dispatchGenerators, dispatchEvaluators]);
 
   // --- Completion Detection ---
+  // Use ref for advancePipeline to avoid re-registering listener on every render
+  const advancePipelineRef = useRef(advancePipeline);
+  advancePipelineRef.current = advancePipeline;
 
   useEffect(() => {
     const handleComplete = (event: any) => {
       console.log('[harness] message.complete event:', JSON.stringify(event));
       console.log('[harness] groups:', groupsRef.current.map(g => ({ id: g.id, status: g.status, conns: g.connections.length })));
-      console.log('[harness] sessions with backend IDs:', sessionsRef.current.map(s => ({ id: s.id, claudeSessionId: s.claudeSessionId, codexThreadId: s.codexThreadId })));
 
       const backendSessionId = event?.session_id;
-      if (!backendSessionId) {
-        console.log('[harness] no session_id in event, skipping');
-        return;
-      }
+      if (!backendSessionId) return;
 
       const session = sessionsRef.current.find(
         s => s.sidecarSessionId === backendSessionId ||
@@ -331,7 +330,7 @@ export function useHarnessController(
              s.codexThreadId === backendSessionId
       );
       if (!session) {
-        console.log('[harness] no matching frontend session for backend ID:', backendSessionId);
+        console.log('[harness] no matching session for:', backendSessionId);
         return;
       }
       console.log('[harness] matched session:', session.id, session.title);
@@ -348,7 +347,7 @@ export function useHarnessController(
       }
       console.log('[harness] advancing pipeline for group:', group.id, 'session:', session.id);
 
-      setTimeout(() => advancePipeline(group.id, session.id), 500);
+      setTimeout(() => advancePipelineRef.current(group.id, session.id), 500);
     };
 
     if (typeof window !== 'undefined' && window.aiBackend) {
@@ -360,7 +359,7 @@ export function useHarnessController(
         window.aiBackend.off('message.complete', handleComplete);
       }
     };
-  }, [advancePipeline]);
+  }, []); // Empty deps — refs always have latest values
 
   // --- Pipeline Control ---
 
