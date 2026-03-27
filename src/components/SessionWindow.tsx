@@ -325,8 +325,8 @@ export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>
     const handleSessionInit = (data: { session_id: string; claude_session_id?: string; codex_thread_id?: string; agent?: string }) => {
       if (data.session_id === backendSessionIdRef.current) {
         const updated = data.agent === 'codex'
-          ? { ...sessionRef.current, codexThreadId: data.codex_thread_id }
-          : { ...sessionRef.current, claudeSessionId: data.claude_session_id };
+          ? { ...sessionRef.current, codexThreadId: data.codex_thread_id, sidecarSessionId: data.session_id }
+          : { ...sessionRef.current, claudeSessionId: data.claude_session_id, sidecarSessionId: data.session_id };
         sessionRef.current = updated;
         onUpdate(updated);
       }

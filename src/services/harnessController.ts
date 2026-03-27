@@ -322,7 +322,9 @@ export function useHarnessController(
       }
 
       const session = sessionsRef.current.find(
-        s => s.claudeSessionId === backendSessionId || s.codexThreadId === backendSessionId
+        s => s.sidecarSessionId === backendSessionId ||
+             s.claudeSessionId === backendSessionId ||
+             s.codexThreadId === backendSessionId
       );
       if (!session) {
         console.log('[harness] no matching frontend session for backend ID:', backendSessionId);

@@ -61,6 +61,7 @@ export interface Session {
   prevHeight?: number;
   claudeSessionId?: string;
   codexThreadId?: string;
+  sidecarSessionId?: string;
   harnessRole?: HarnessRole;
   harnessGroupId?: string;
 }
