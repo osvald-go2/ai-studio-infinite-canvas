@@ -52,6 +52,9 @@ export function useHarnessController(
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
 
+  const projectDirRef = useRef(projectDir);
+  projectDirRef.current = projectDir;
+
   // Runtime-only pipeline state, separate from persistent HarnessGroup
   const runStateRef = useRef<Map<string, HarnessRunState>>(new Map());
 
@@ -193,8 +196,9 @@ export function useHarnessController(
   const advancePipeline = useCallback(async (groupId: string, completedSessionId: string) => {
     console.log('[harness] advancePipeline called:', { groupId, completedSessionId });
     const group = groupsRef.current.find(g => g.id === groupId);
-    if (!group || !projectDir) {
-      console.log('[harness] advancePipeline bail: group=', !!group, 'projectDir=', projectDir);
+    const dir = projectDirRef.current;
+    if (!group || !dir) {
+      console.log('[harness] advancePipeline bail: group=', !!group, 'projectDir=', dir);
       return;
     }
 
@@ -216,7 +220,7 @@ export function useHarnessController(
       if (!planContent) return;
 
       await writeHarnessFile(
-        projectDir, group.id, group.currentSprint, 'plan.md', planContent
+        dir, group.id, group.currentSprint, 'plan.md', planContent
       );
 
       const prompt = buildGeneratorPrompt(group.currentSprint, planContent);
@@ -233,7 +237,7 @@ export function useHarnessController(
         : 'result.md';
 
       await writeHarnessFile(
-        projectDir, group.id, group.currentSprint, filename, resultContent
+        dir, group.id, group.currentSprint, filename, resultContent
       );
 
       const pending = runState.pendingGenerators.filter(id => id !== completedSessionId);
@@ -244,7 +248,7 @@ export function useHarnessController(
       }
 
       const planContent = await readHarnessFile(
-        projectDir, group.id, group.currentSprint, 'plan.md'
+        dir, group.id, group.currentSprint, 'plan.md'
       );
 
       const evalPrompt = buildEvaluatorPrompt(
@@ -264,7 +268,7 @@ export function useHarnessController(
       const reviewFilename = `review-${group.currentRound + 1}.md`;
 
       await writeHarnessFile(
-        projectDir, group.id, group.currentSprint, reviewFilename, reviewContent
+        dir, group.id, group.currentSprint, reviewFilename, reviewContent
       );
 
       const verdict = parseVerdict(reviewContent);
@@ -283,13 +287,13 @@ export function useHarnessController(
       }
 
       const planContent = await readHarnessFile(
-        projectDir, group.id, group.currentSprint, 'plan.md'
+        dir, group.id, group.currentSprint, 'plan.md'
       );
       const resultFilename = group.currentRound > 0
         ? `result-${group.currentRound + 1}.md`
         : 'result.md';
       const resultContent = await readHarnessFile(
-        projectDir, group.id, group.currentSprint, resultFilename
+        dir, group.id, group.currentSprint, resultFilename
       );
 
       const revisionPrompt = buildRevisionPrompt(
@@ -304,7 +308,7 @@ export function useHarnessController(
       await dispatchGenerators(groupId, group, generators, revisionPrompt);
       return;
     }
-  }, [projectDir, getSessionsByRole, getLastAssistantText, updateGroup,
+  }, [getSessionsByRole, getLastAssistantText, updateGroup,
       dispatchGenerators, dispatchEvaluators]);
 
   // --- Completion Detection ---
