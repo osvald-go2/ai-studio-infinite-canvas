@@ -1241,7 +1241,8 @@ function DraggableSession({
       {/* Harness connection anchor (right side - drag source) */}
       {harness && (
         <div
-          className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-3 h-3 rounded-full bg-zinc-600 border border-zinc-500 opacity-0 hover:opacity-100 cursor-crosshair transition-opacity z-10"
+          className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 group z-20 cursor-crosshair"
+          style={{ width: 24, height: 24 }}
           onMouseDown={(e) => {
             e.stopPropagation();
             onAnchorDragStart?.(
@@ -1256,13 +1257,15 @@ function DraggableSession({
               onAnchorDragEnd?.(session.id);
             }
           }}
-        />
+        >
+          <div className="absolute inset-0 m-auto w-3 h-3 rounded-full bg-blue-500 border-2 border-blue-400 opacity-40 group-hover:opacity-100 transition-opacity shadow-lg shadow-blue-500/50" />
+        </div>
       )}
 
       {/* Harness connection anchor (left side - drop target, shown when connecting) */}
       {harness && connectingFrom && connectingFrom.sessionId !== session.id && (
         <div
-          className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-blue-500/30 border-2 border-blue-400 cursor-crosshair z-10 animate-pulse"
+          className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-blue-500/40 border-2 border-blue-400 cursor-crosshair z-20 animate-pulse"
           onMouseUp={(e) => {
             e.stopPropagation();
             onAnchorDragEnd?.(session.id);
