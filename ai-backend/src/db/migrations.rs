@@ -1,6 +1,6 @@
 use super::Database;
 
-const CURRENT_VERSION: i64 = 3;
+const CURRENT_VERSION: i64 = 4;
 
 pub fn run(db: &Database) -> Result<(), String> {
     let conn = db.conn();
@@ -21,6 +21,32 @@ pub fn run(db: &Database) -> Result<(), String> {
         migrate_v3(&conn)?;
     }
 
+    if version < 4 {
+        migrate_v4(&conn)?;
+    }
+
+    Ok(())
+}
+
+fn migrate_v4(conn: &rusqlite::Connection) -> Result<(), String> {
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS harness_groups (
+            id              VARCHAR(36) PRIMARY KEY,
+            project_id      INTEGER NOT NULL,
+            name            VARCHAR(255) NOT NULL,
+            connections_json TEXT NOT NULL DEFAULT '[]',
+            max_retries     INTEGER NOT NULL DEFAULT 3,
+            status          VARCHAR(20) NOT NULL DEFAULT 'idle',
+            current_sprint  INTEGER NOT NULL DEFAULT 0,
+            current_round   INTEGER NOT NULL DEFAULT 0,
+            harness_dir     VARCHAR(1024) NOT NULL DEFAULT '',
+            created_at      VARCHAR(30) NOT NULL,
+            updated_at      VARCHAR(30) NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_harness_groups_project ON harness_groups(project_id);
+        PRAGMA user_version = 4;
+    ").map_err(|e| format!("migration v4 failed: {e}"))?;
     Ok(())
 }
 
@@ -115,7 +141,7 @@ mod tests {
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
     }
 
     #[test]
@@ -126,7 +152,7 @@ mod tests {
         let version: i64 = db.conn()
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
     }
 
     #[test]

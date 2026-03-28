@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { X, Clock, Plus, MessageSquare, Send, Copy, ThumbsUp, ThumbsDown, ArrowUp, Square, Minus, Check, Pencil, RotateCcw, GitBranch, GitFork, Trash2, ChevronDown, Loader2 } from 'lucide-react';
 import { Session, Message, ContentBlock, SkillInfo } from '../types';
+import type { SessionWindowHandle } from '../types';
 import { MessageRenderer } from './message/MessageRenderer';
 import { STRUCTURED_MOCK_RESPONSES } from '../utils/mockResponses';
 import { backend } from '../services/backend';
@@ -17,22 +18,7 @@ function isElectron(): boolean {
 }
 let mockResponseIndex = 0;
 
-export const SessionWindow = React.memo(function SessionWindow({
-  session,
-  onUpdate,
-  onClose,
-  onDelete,
-  fullScreen = false,
-  height,
-  animateHeight = false,
-  onHeaderDoubleClick,
-  variant = 'default',
-  projectDir,
-  onToggleGitPanel,
-  onCopySession,
-  onOpenFileInPanel,
-  onOpenDiffInPanel
-}: {
+type SessionWindowProps = {
   session: Session,
   onUpdate: (s: Session) => void,
   onClose?: () => void,
@@ -47,7 +33,24 @@ export const SessionWindow = React.memo(function SessionWindow({
   onCopySession?: (title: string) => void,
   onOpenFileInPanel?: (path: string) => void,
   onOpenDiffInPanel?: (path: string) => void
-}) {
+};
+
+export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>(function SessionWindow({
+  session,
+  onUpdate,
+  onClose,
+  onDelete,
+  fullScreen = false,
+  height,
+  animateHeight = false,
+  onHeaderDoubleClick,
+  variant = 'default',
+  projectDir,
+  onToggleGitPanel,
+  onCopySession,
+  onOpenFileInPanel,
+  onOpenDiffInPanel
+}, ref) {
   const [inputValue, setInputValue] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
@@ -70,7 +73,7 @@ export const SessionWindow = React.memo(function SessionWindow({
     }
   }, [])
 
-  const { info, changes } = useGit();
+  const { info, changes, isRepo } = useGit();
   const [worktreeAdditions, setWorktreeAdditions] = useState(0);
   const [worktreeDeletions, setWorktreeDeletions] = useState(0);
   const hasWorktree = session.worktree && session.worktree !== 'default';
@@ -380,8 +383,8 @@ export const SessionWindow = React.memo(function SessionWindow({
     const handleSessionInit = (data: { session_id: string; claude_session_id?: string; codex_thread_id?: string; agent?: string }) => {
       if (data.session_id === backendSessionIdRef.current) {
         const updated = data.agent === 'codex'
-          ? { ...sessionRef.current, codexThreadId: data.codex_thread_id }
-          : { ...sessionRef.current, claudeSessionId: data.claude_session_id };
+          ? { ...sessionRef.current, codexThreadId: data.codex_thread_id, sidecarSessionId: data.session_id }
+          : { ...sessionRef.current, claudeSessionId: data.claude_session_id, sidecarSessionId: data.session_id };
         sessionRef.current = updated;
         onUpdate(updated);
       }
@@ -691,6 +694,17 @@ export const SessionWindow = React.memo(function SessionWindow({
       });
     }
   };
+
+  // Ref to latest sendMessage for stable imperative handle
+  const sendMessageRef = useRef(sendMessage);
+  sendMessageRef.current = sendMessage;
+
+  useImperativeHandle(ref, () => ({
+    async injectMessage(content: string) {
+      console.log('[harness] injectMessage called for session:', session.id, 'content length:', content.length);
+      await sendMessageRef.current(content);
+    }
+  }), [session.id]);
 
   const handleSend = async () => {
     if (!inputValue.trim() || isStreaming) return;
@@ -1404,7 +1418,7 @@ export const SessionWindow = React.memo(function SessionWindow({
                 )}
               </div>
 
-              {(totalAdditions > 0 || totalDeletions > 0) && (
+              {isRepo && (totalAdditions > 0 || totalDeletions > 0) && (
                 <button
                   onClick={onToggleGitPanel}
                   aria-label="View git changes"
@@ -1417,7 +1431,7 @@ export const SessionWindow = React.memo(function SessionWindow({
               )}
 
               {/* Changes indicator */}
-              {session.status === 'review' && session.hasChanges && (
+              {isRepo && session.status === 'review' && session.hasChanges && (
                 <span className="flex items-center gap-1 bg-white/[0.06] px-2 py-1 rounded-lg text-[11px] font-mono border border-white/[0.06]">
                   <span className="text-amber-400">{session.changeCount ?? '~'} changes</span>
                 </span>

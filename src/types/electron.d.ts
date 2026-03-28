@@ -41,6 +41,13 @@ interface AiBackend {
   ipcOn(channel: string, callback: (...args: any[]) => void): void;
   ipcOff(channel: string, callback: (...args: any[]) => void): void;
   ipcSend(channel: string, ...args: any[]): void;
+
+  // Harness file I/O
+  harness: {
+    writeFile: (filePath: string, content: string) => Promise<void>;
+    readFile: (filePath: string) => Promise<string>;
+    mkdir: (dirPath: string) => Promise<void>;
+  };
 }
 
 interface Window {

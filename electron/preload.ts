@@ -153,6 +153,13 @@ contextBridge.exposeInMainWorld('aiBackend', {
     },
   },
 
+  // Harness file I/O
+  harness: {
+    writeFile: (filePath: string, content: string) => ipcRenderer.invoke('harness:write-file', filePath, content),
+    readFile: (filePath: string) => ipcRenderer.invoke('harness:read-file', filePath) as Promise<string>,
+    mkdir: (dirPath: string) => ipcRenderer.invoke('harness:mkdir', dirPath),
+  },
+
   // Scoped IPC — only allows chat-popup: prefixed channels
   ipcOn: (channel: string, callback: (...args: any[]) => void) => {
     if (!channel.startsWith('chat-popup:')) throw new Error(`ipcOn: channel "${channel}" not allowed`)

@@ -1,4 +1,4 @@
-import { ContentBlock, DbProject, DbSession } from '../types';
+import { ContentBlock, DbHarnessGroup, DbProject, DbSession } from '../types';
 
 function isElectron(): boolean {
   return typeof window !== 'undefined' && window.aiBackend !== undefined;
@@ -157,6 +157,23 @@ export const backend = {
   async updateSessionPosition(sessionId: string, x: number, y: number, height?: number): Promise<void> {
     if (!isElectron()) return;
     await window.aiBackend.invoke('session.update_position', { session_id: sessionId, x, y, height });
+  },
+
+  // Harness group persistence methods
+  async saveHarnessGroup(group: DbHarnessGroup): Promise<void> {
+    if (!isElectron()) return;
+    await window.aiBackend.invoke('harness.save', group);
+  },
+
+  async loadHarnessGroups(projectId: number): Promise<DbHarnessGroup[]> {
+    if (!isElectron()) return [];
+    const result = await window.aiBackend.invoke('harness.load', { project_id: projectId });
+    return result.groups;
+  },
+
+  async deleteHarnessGroup(groupId: string): Promise<void> {
+    if (!isElectron()) return;
+    await window.aiBackend.invoke('harness.delete', { group_id: groupId });
   },
 
   // Settings methods

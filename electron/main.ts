@@ -433,6 +433,22 @@ ipcMain.handle('pty:kill', (_, id: number) => {
   ptyProcesses.delete(id);
 });
 
+// Harness file operations
+ipcMain.handle('harness:write-file', async (_, filePath: string, content: string) => {
+  const fs = await import('fs/promises');
+  await fs.writeFile(filePath, content, 'utf-8');
+});
+
+ipcMain.handle('harness:read-file', async (_, filePath: string) => {
+  const fs = await import('fs/promises');
+  return await fs.readFile(filePath, 'utf-8');
+});
+
+ipcMain.handle('harness:mkdir', async (_, dirPath: string) => {
+  const fs = await import('fs/promises');
+  await fs.mkdir(dirPath, { recursive: true });
+});
+
 app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) {
     app.dock.setIcon(nativeImage.createFromPath(getIconPath()));
