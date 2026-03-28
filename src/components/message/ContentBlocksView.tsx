@@ -81,7 +81,7 @@ export function ContentBlocksView({
           case 'skill':
             return <SkillBlock key={index} {...block} />;
           case 'file_changes':
-            return <FileChangesBlock key={index} {...block} />;
+            return null;
           case 'form_table':
             return <FormTableBlock key={index} {...block} />;
           default:

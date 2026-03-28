@@ -87,7 +87,7 @@ function TreeNodeItem({
   );
 }
 
-export function FilesTab() {
+export function FilesTab({ selectedFile: externalFile, onFileConsumed }: { selectedFile?: string | null; onFileConsumed?: () => void }) {
   const { fileTree, changes, getFileContent, refreshFileTree } = useGit();
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string>('');
@@ -98,6 +98,13 @@ export function FilesTab() {
       refreshFileTree();
     }
   }, []);
+
+  useEffect(() => {
+    if (externalFile) {
+      handleSelectFile(externalFile);
+      onFileConsumed?.();
+    }
+  }, [externalFile]);
 
   const changedPaths = new Map(changes.map(c => [c.path, c.status]));
 

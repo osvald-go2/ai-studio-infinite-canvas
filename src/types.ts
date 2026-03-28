@@ -21,6 +21,8 @@ export interface FormTableColumn {
 export interface FileChangeItem {
   path: string;
   status: 'new' | 'modified' | 'deleted' | 'renamed';
+  additions?: number;
+  deletions?: number;
 }
 
 export interface AskUserQuestion {

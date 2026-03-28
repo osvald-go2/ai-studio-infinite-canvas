@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AI Studio Infinite Canvas — a React SPA for managing multiple AI sessions (Claude, Codex, Gemini) concurrently across an infinite canvas, Kanban board, or tab view.
+Meka Flow — a React SPA for managing multiple AI sessions (Claude, Codex, Gemini) concurrently across an infinite canvas, Kanban board, or tab view.
 
 ## Commands
 

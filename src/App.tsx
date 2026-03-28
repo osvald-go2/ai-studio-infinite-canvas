@@ -14,7 +14,7 @@ import { GitPanel } from './components/git/GitPanel';
 import { TerminalPanel } from './components/terminal/TerminalPanel';
 import { GitProvider } from './contexts/GitProvider';
 import { HomePage } from './components/HomePage';
-import { Session, SessionStatus, Message, DbProject, DbSession } from './types';
+import { Session, SessionStatus, Message, DbProject, DbSession, DbHarnessGroup, HarnessGroup, HarnessGroupStatus } from './types';
 import type { SessionWindowHandle } from './types';
 import { useHarnessController } from './services/harnessController';
 import { backend } from './services/backend';
@@ -138,6 +138,8 @@ export default function App() {
   const [projectDir, setProjectDir] = useState<string | null>(null);
   const [isGitRepo, setIsGitRepo] = useState(false);
   const [showGitPanel, setShowGitPanel] = useState(false);
+  const [gitPanelActiveTab, setGitPanelActiveTab] = useState<'changes' | 'git' | 'files' | null>(null);
+  const [gitPanelSelectedFile, setGitPanelSelectedFile] = useState<string | null>(null);
 
   // Canvas Transform State (lifted from CanvasView)
   const [canvasTransform, setCanvasTransform] = useState({ x: 0, y: 0, scale: 1 });
@@ -148,11 +150,14 @@ export default function App() {
   const [isSwitchingProject, setIsSwitchingProject] = useState(false);
   const sessionCreatedAtRef = useRef<Record<string, string>>({});
   const loadedSessionIdsRef = useRef<Set<string>>(new Set());
+  const loadedGroupIdsRef = useRef<Set<string>>(new Set());
   const canvasWidthRef = useRef(window.innerWidth);
   const sessionRefs = useRef<Map<string, SessionWindowHandle>>(new Map());
   const isElectronApp = typeof window !== 'undefined' && (window as any).aiBackend !== undefined;
 
-  const harness = useHarnessController(sessions, setSessions, projectDir, sessionRefs);
+  // Harness groups persistence state
+  const [initialHarnessGroups, setInitialHarnessGroups] = useState<HarnessGroup[]>([]);
+  const harness = useHarnessController(sessions, setSessions, projectDir, sessionRefs, initialHarnessGroups);
 
   // Compute terminal cwd based on active session's worktree
   const activeSession = sessions.find(s => s.id === activeSessionId);
@@ -162,6 +167,10 @@ export default function App() {
 
   // Ref for focusing the search input in TopBar
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Ref to access latest sessions in event handlers without re-registering
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -194,15 +203,15 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && !isInput && e.key >= '1' && e.key <= '9') {
         e.preventDefault();
         const index = parseInt(e.key) - 1;
-        if (index < sessions.length) {
-          setFocusedSessionId(sessions[index].id);
+        if (index < sessionsRef.current.length) {
+          setFocusedSessionId(sessionsRef.current[index].id);
         }
         return;
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [sessions]);
+  }, []);
 
   // Re-check git repo status when projectDir changes
   useEffect(() => {
@@ -210,9 +219,12 @@ export default function App() {
     gitService.checkRepo(projectDir).then(setIsGitRepo).catch(() => setIsGitRepo(false));
   }, [projectDir]);
 
-  // Apply a project: load sessions, restore state
+  // Apply a project: load sessions and harness groups, restore state
   const applyProject = useCallback(async (project: DbProject) => {
-    const dbSessions = await backend.loadSessions(project.id);
+    const [dbSessions, dbGroups] = await Promise.all([
+      backend.loadSessions(project.id),
+      backend.loadHarnessGroups(project.id),
+    ]);
     const loaded: Session[] = dbSessions.map(s => {
       sessionCreatedAtRef.current[s.id] = s.created_at;
       return {
@@ -229,9 +241,24 @@ export default function App() {
         messages: JSON.parse(s.messages),
       };
     });
+
+    // Deserialize harness groups; reset 'running' to 'paused' (pipeline can't resume mid-flight)
+    const loadedGroups: HarnessGroup[] = dbGroups.map(g => ({
+      id: g.id,
+      name: g.name,
+      connections: JSON.parse(g.connections_json),
+      maxRetries: g.max_retries,
+      status: (g.status === 'running' ? 'paused' : g.status) as HarnessGroupStatus,
+      currentSprint: g.current_sprint,
+      currentRound: g.current_round,
+      harnessDir: g.harness_dir,
+    }));
+
     setCurrentProject(project);
     setSessions(loaded.length > 0 ? loaded : initialSessions);
     loadedSessionIdsRef.current = new Set(loaded.map(s => s.id));
+    setInitialHarnessGroups(loadedGroups);
+    loadedGroupIdsRef.current = new Set(loadedGroups.map(g => g.id));
     setViewMode(project.view_mode as 'canvas' | 'board' | 'tab');
     setCanvasTransform({ x: project.canvas_x, y: project.canvas_y, scale: project.canvas_zoom });
     setProjectDir(project.path);
@@ -269,6 +296,27 @@ export default function App() {
     }));
   }, []);
 
+  // Flush pending harness group saves immediately
+  const flushHarnessGroupSaves = useCallback(async (groupsToSave: HarnessGroup[], projectId: number) => {
+    const now = new Date().toISOString();
+    await Promise.all(groupsToSave.map(group => {
+      const dbGroup: DbHarnessGroup = {
+        id: group.id,
+        project_id: projectId,
+        name: group.name,
+        connections_json: JSON.stringify(group.connections),
+        max_retries: group.maxRetries,
+        status: group.status,
+        current_sprint: group.currentSprint,
+        current_round: group.currentRound,
+        harness_dir: group.harnessDir,
+        created_at: now,
+        updated_at: now,
+      };
+      return backend.saveHarnessGroup(dbGroup);
+    }));
+  }, []);
+
   // Switch to a different project
   const switchProject = useCallback(async (projectId: number) => {
     if (isSwitchingProject) return;
@@ -282,6 +330,7 @@ export default function App() {
     // Phase 1: Immediately clear UI so the user sees a responsive switch
     const prevProject = currentProject;
     const prevSessions = sessions;
+    const prevGroups = harness.groups;
     const prevViewMode = viewMode;
     const prevTransform = canvasTransform;
 
@@ -300,6 +349,7 @@ export default function App() {
           canvas_zoom: prevTransform.scale,
         }),
         flushSessionSaves(prevSessions, prevProject.id),
+        flushHarnessGroupSaves(prevGroups, prevProject.id),
       ]).catch(err => console.warn('Background save failed:', err));
     }
 
@@ -313,7 +363,7 @@ export default function App() {
     } finally {
       setIsSwitchingProject(false);
     }
-  }, [isSwitchingProject, currentProject, viewMode, canvasTransform, sessions, projects, flushSessionSaves, applyProject]);
+  }, [isSwitchingProject, currentProject, viewMode, canvasTransform, sessions, projects, flushSessionSaves, flushHarnessGroupSaves, harness.groups, applyProject]);
 
   // Load project list and show homepage on mount
   useEffect(() => {
@@ -366,13 +416,57 @@ export default function App() {
     return () => clearTimeout(saveTimeout);
   }, [sessions, currentProject]);
 
+  // Auto-save harness groups to backend (debounced)
+  useEffect(() => {
+    if (!isElectronApp || !currentProject || isSwitchingProject) return;
+
+    const saveTimeout = setTimeout(() => {
+      const now = new Date().toISOString();
+      harness.groups.forEach(group => {
+        const dbGroup: DbHarnessGroup = {
+          id: group.id,
+          project_id: currentProject.id,
+          name: group.name,
+          connections_json: JSON.stringify(group.connections),
+          max_retries: group.maxRetries,
+          status: group.status,
+          current_sprint: group.currentSprint,
+          current_round: group.currentRound,
+          harness_dir: group.harnessDir,
+          created_at: now,
+          updated_at: now,
+        };
+        backend.saveHarnessGroup(dbGroup).catch(console.error);
+      });
+    }, 1000);
+
+    return () => clearTimeout(saveTimeout);
+  }, [harness.groups, currentProject]);
+
+  // Sync harness group deletions to backend
+  useEffect(() => {
+    if (!isElectronApp || !currentProject) return;
+
+    const currentGroupIds = new Set(harness.groups.map(g => g.id));
+    const previousGroupIds = loadedGroupIdsRef.current;
+
+    previousGroupIds.forEach(id => {
+      if (!currentGroupIds.has(id)) {
+        backend.deleteHarnessGroup(id).catch(console.error);
+      }
+    });
+
+    loadedGroupIdsRef.current = currentGroupIds;
+  }, [harness.groups, currentProject]);
+
   // Refs to access latest state in before-quit handler
-  const sessionsRef = useRef(sessions);
   const currentProjectRef = useRef(currentProject);
+  const harnessGroupsRef = useRef(harness.groups);
   sessionsRef.current = sessions;
   currentProjectRef.current = currentProject;
+  harnessGroupsRef.current = harness.groups;
 
-  // Flush session saves before app quit
+  // Flush session and harness group saves before app quit
   useEffect(() => {
     if (!isElectronApp) return;
     const aiBackend = (window as any).aiBackend;
@@ -381,16 +475,20 @@ export default function App() {
     aiBackend.onBeforeQuit(async () => {
       const proj = currentProjectRef.current;
       const sess = sessionsRef.current;
+      const groups = harnessGroupsRef.current;
       if (proj) {
         try {
-          await flushSessionSaves(sess, proj.id);
+          await Promise.all([
+            flushSessionSaves(sess, proj.id),
+            flushHarnessGroupSaves(groups, proj.id),
+          ]);
         } catch (e) {
           console.error('Emergency flush failed:', e);
         }
       }
       aiBackend.notifyFlushComplete();
     });
-  }, [flushSessionSaves]);
+  }, [flushSessionSaves, flushHarnessGroupSaves]);
 
   // Island integration — session-independent listeners (register once)
   useEffect(() => {
@@ -628,6 +726,18 @@ export default function App() {
     setSessions((prev) => prev.map((s) => s.id === id ? { ...s, ...updates } : s));
   };
 
+  const handleOpenFileInPanel = useCallback((path: string) => {
+    setShowGitPanel(true);
+    setGitPanelActiveTab('files');
+    setGitPanelSelectedFile(path);
+  }, []);
+
+  const handleOpenDiffInPanel = useCallback((path: string) => {
+    setShowGitPanel(true);
+    setGitPanelActiveTab('changes');
+    setGitPanelSelectedFile(path);
+  }, []);
+
   const handleOpenDirectory = async () => {
     if (!isElectronApp) return;
     const aiBackend = (window as any).aiBackend;
@@ -658,7 +768,18 @@ export default function App() {
   // Homepage: show when no project is open
   if (showHomePage) {
     return (
-      <div className="w-screen h-screen overflow-hidden text-white font-sans relative">
+      <div className="w-screen h-screen overflow-hidden bg-black text-white font-sans flex flex-col relative">
+        {/* Atmospheric blurred background */}
+        <div
+          className="absolute inset-0 z-0 bg-cover bg-center transition-all duration-1000"
+          style={{
+            backgroundImage: 'url(https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop)',
+            opacity: 0.4,
+            filter: 'blur(60px) saturate(120%)',
+            transform: 'scale(1.2)'
+          }}
+        />
+        <div className="absolute inset-0 z-0 bg-gradient-to-b from-black/20 to-black/60" />
         <HomePage
           projects={projects}
           onOpenDirectory={handleOpenDirectory}
@@ -723,6 +844,8 @@ export default function App() {
                   onNewSession={() => setIsNewModalOpen(true)}
                   harness={harness}
                   sessionRefs={sessionRefs}
+                  onOpenFileInPanel={handleOpenFileInPanel}
+                  onOpenDiffInPanel={handleOpenDiffInPanel}
                 />
               ) : viewMode === 'board' ? (
                 <BoardView
@@ -734,6 +857,8 @@ export default function App() {
                   onCopySession={handleCopySession}
                   onActiveSessionChange={(id) => setActiveSessionId(id)}
                   onClearFocus={() => setFocusedSessionId(null)}
+                  onOpenFileInPanel={handleOpenFileInPanel}
+                  onOpenDiffInPanel={handleOpenDiffInPanel}
                 />
               ) : (
                 <TabView
@@ -745,6 +870,8 @@ export default function App() {
                   onCopySession={handleCopySession}
                   onActiveSessionChange={(id) => setActiveSessionId(id)}
                   onClearFocus={() => setFocusedSessionId(null)}
+                  onOpenFileInPanel={handleOpenFileInPanel}
+                  onOpenDiffInPanel={handleOpenDiffInPanel}
                 />
               )}
             </div>
@@ -755,6 +882,9 @@ export default function App() {
                 isOpen={showGitPanel}
                 onClose={() => setShowGitPanel(false)}
                 onOpenDiff={(filePath) => setReviewFilePath(filePath)}
+                activeTab={gitPanelActiveTab}
+                selectedFile={gitPanelSelectedFile}
+                onTabConsumed={() => { setGitPanelActiveTab(null); setGitPanelSelectedFile(null); }}
               />
             )}
           </div>

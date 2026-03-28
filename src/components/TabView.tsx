@@ -13,6 +13,8 @@ export function TabView({
   onCopySession,
   onActiveSessionChange,
   onClearFocus,
+  onOpenFileInPanel,
+  onOpenDiffInPanel,
 }: {
   sessions: Session[],
   setSessions: any,
@@ -22,6 +24,8 @@ export function TabView({
   onCopySession?: (title: string) => void,
   onActiveSessionChange?: (id: string | null) => void,
   onClearFocus?: () => void,
+  onOpenFileInPanel?: (path: string) => void,
+  onOpenDiffInPanel?: (path: string) => void,
 }) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(sessions[0]?.id || null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -184,6 +188,8 @@ export function TabView({
             projectDir={projectDir}
             onToggleGitPanel={onToggleGitPanel}
             onCopySession={onCopySession}
+            onOpenFileInPanel={onOpenFileInPanel}
+            onOpenDiffInPanel={onOpenDiffInPanel}
           />
         ) : (
           <div className="flex flex-col items-center justify-center w-full h-full text-gray-500 gap-4">

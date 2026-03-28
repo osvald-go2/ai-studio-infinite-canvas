@@ -38,3 +38,18 @@ pub struct Setting {
     pub value: String,
     pub updated_at: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbHarnessGroup {
+    pub id: String,
+    pub project_id: i64,
+    pub name: String,
+    pub connections_json: String,
+    pub max_retries: i64,
+    pub status: String,
+    pub current_sprint: i64,
+    pub current_round: i64,
+    pub harness_dir: String,
+    pub created_at: String,
+    pub updated_at: String,
+}

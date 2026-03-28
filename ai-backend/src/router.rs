@@ -584,6 +584,48 @@ pub async fn handle_request(
             }
         }
 
+        // ── harness group persistence ───────────────────────────────────────
+
+        "harness.save" => {
+            let group: db::DbHarnessGroup = match serde_json::from_value(req.params.clone()) {
+                Ok(g) => g,
+                Err(e) => return ErrorResponse::new(req.id, 1002, format!("invalid params: {e}")),
+            };
+            let exists = db::harness_groups::get_by_id(database, &group.id)
+                .unwrap_or(None)
+                .is_some();
+            let result = if exists {
+                db::harness_groups::update(database, &group)
+            } else {
+                db::harness_groups::create(database, &group)
+            };
+            match result {
+                Ok(()) => Response::ok(req.id, json!({ "ok": true })),
+                Err(e) => ErrorResponse::new(req.id, 1003, e),
+            }
+        }
+
+        "harness.load" => {
+            let project_id = req.params.get("project_id")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            match db::harness_groups::list_by_project(database, project_id) {
+                Ok(groups) => Response::ok(req.id, json!({ "groups": groups })),
+                Err(e) => ErrorResponse::new(req.id, 1003, e),
+            }
+        }
+
+        "harness.delete" => {
+            let group_id = req.params.get("group_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            match db::harness_groups::delete(database, &group_id) {
+                Ok(()) => Response::ok(req.id, json!({ "ok": true })),
+                Err(e) => ErrorResponse::new(req.id, 1003, e),
+            }
+        }
+
         // ── settings persistence ─────────────────────────────────────────────
 
         "settings.get" => {

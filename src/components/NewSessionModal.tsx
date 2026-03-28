@@ -98,7 +98,7 @@ export function NewSessionModal({ isOpen, onClose, onCreate, projectDir, isGitRe
       setWorktreeError(null);
       try {
         // 调用后端创建 worktree，base 是基础分支名（不是路径）
-        // 后端会在 .ai-studio/worktrees/ 下创建并返回实际路径
+        // 后端会在 .meka-flow/worktrees/ 下创建并返回实际路径
         const worktreePath = await gitService.createWorktree(projectDir, newBranch.trim(), baseBranch);
         finalWorktree = worktreePath;
         finalBranch = newBranch.trim();

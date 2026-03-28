@@ -1,4 +1,5 @@
 pub mod connection;
+pub mod harness_groups;
 pub mod migrations;
 pub mod projects;
 pub mod sessions;

@@ -63,7 +63,7 @@ impl Database {
         let data_dir = dirs::data_dir()
             .ok_or("could not determine user data directory")?;
         let mut path: PathBuf = data_dir;
-        path.push("ai-studio-infinite-canvas");
+        path.push("meka-flow");
         path.push("data.db");
         path.to_str()
             .map(|s| s.to_string())

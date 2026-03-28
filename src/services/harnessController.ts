@@ -43,11 +43,21 @@ export function useHarnessController(
   sessions: Session[],
   setSessions: React.Dispatch<React.SetStateAction<Session[]>>,
   projectDir: string | null,
-  sessionRefs: React.RefObject<Map<string, SessionWindowHandle>>
+  sessionRefs: React.RefObject<Map<string, SessionWindowHandle>>,
+  initialGroups?: HarnessGroup[]
 ): UseHarnessController {
-  const [groups, setGroups] = useState<HarnessGroup[]>([]);
+  const [groups, setGroups] = useState<HarnessGroup[]>(initialGroups ?? []);
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
+
+  // Reset groups when initialGroups changes (project switch)
+  const initialGroupsRef = useRef(initialGroups);
+  useEffect(() => {
+    if (initialGroups && initialGroups !== initialGroupsRef.current) {
+      setGroups(initialGroups);
+      initialGroupsRef.current = initialGroups;
+    }
+  }, [initialGroups]);
 
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
@@ -73,6 +83,25 @@ export function useHarnessController(
   const clearRunState = (groupId: string) => {
     runStateRef.current.delete(groupId);
   };
+
+  // Clean up connections when sessions are deleted
+  useEffect(() => {
+    const sessionIds = new Set(sessions.map(s => s.id));
+    setGroups(prev => {
+      let changed = false;
+      const updated = prev.map(g => {
+        const filtered = g.connections.filter(
+          c => sessionIds.has(c.fromSessionId) && sessionIds.has(c.toSessionId)
+        );
+        if (filtered.length !== g.connections.length) {
+          changed = true;
+          return { ...g, connections: filtered };
+        }
+        return g;
+      });
+      return changed ? updated : prev;
+    });
+  }, [sessions]);
 
   // --- Group Management ---
 

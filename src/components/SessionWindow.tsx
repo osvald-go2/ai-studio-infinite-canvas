@@ -8,6 +8,7 @@ import { backend } from '../services/backend';
 import { gitService } from '../services/git';
 import { getStatusDotClass } from '../utils/statusColors';
 import { SkillPicker } from './SkillPicker';
+import { SessionFilesSummary } from './message/SessionFilesSummary';
 import { scanSkills } from '../services/skillScanner';
 import { useGit } from '../contexts/GitProvider';
 import { getAgentType, getModelDisplayName, getModelFullLabel, getSiblingVariants } from '../models';
@@ -29,7 +30,9 @@ type SessionWindowProps = {
   variant?: 'default' | 'tab' | 'popup',
   projectDir?: string | null,
   onToggleGitPanel?: () => void,
-  onCopySession?: (title: string) => void
+  onCopySession?: (title: string) => void,
+  onOpenFileInPanel?: (path: string) => void,
+  onOpenDiffInPanel?: (path: string) => void
 };
 
 export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>(function SessionWindow({
@@ -44,7 +47,9 @@ export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>
   variant = 'default',
   projectDir,
   onToggleGitPanel,
-  onCopySession
+  onCopySession,
+  onOpenFileInPanel,
+  onOpenDiffInPanel
 }, ref) {
   const [inputValue, setInputValue] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -82,7 +87,7 @@ export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>
       setWorktreeDeletions(wtChanges.reduce((sum, c) => sum + c.deletions, 0));
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [hasWorktree, session.worktree, session.messages.length]);
+  }, [hasWorktree, session.worktree, session.hasChanges]);
 
   const globalAdditions = changes.reduce((sum, c) => sum + c.additions, 0);
   const globalDeletions = changes.reduce((sum, c) => sum + c.deletions, 0);
@@ -99,6 +104,7 @@ export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>
   const inputValueRef = useRef('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevMsgLenRef = useRef(session.messages.length);
+  const baselineChangesRef = useRef<Map<string, { status: string; additions: number; deletions: number }>>(new Map());
 
   useEffect(() => {
     sessionRef.current = session;
@@ -110,6 +116,26 @@ export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>
         top: scrollContainerRef.current.scrollHeight,
         behavior: 'smooth'
       });
+    }
+  };
+
+  // Snapshot current git changes as baseline before sending a message
+  const captureGitBaseline = async () => {
+    const wt = sessionRef.current.worktree;
+    const workingDir = (wt && wt !== 'default') ? wt : (projectDir ?? null);
+    if (!workingDir || !isElectron()) {
+      baselineChangesRef.current = new Map();
+      return;
+    }
+    try {
+      const changes = await gitService.changes(workingDir);
+      const map = new Map<string, { status: string; additions: number; deletions: number }>();
+      for (const c of changes) {
+        map.set(c.path, { status: c.status, additions: c.additions, deletions: c.deletions });
+      }
+      baselineChangesRef.current = map;
+    } catch {
+      baselineChangesRef.current = new Map();
     }
   };
 
@@ -183,6 +209,8 @@ export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>
         (block as any).code += data.delta.content;
       } else if (block.type === 'tool_call' && data.delta.args) {
         (block as any).args += data.delta.args;
+      } else if (block.type === 'todolist' && data.delta.items) {
+        (block as any).items = data.delta.items;
       }
       blockMap.set(data.block_index, { ...block });
       updateAssistantBlocks(blockMap);
@@ -201,6 +229,8 @@ export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>
         (block as any).status = resolvedStatus;
       } else if (block.type === 'skill') {
         (block as any).status = resolvedStatus === 'error' ? 'error' : 'done';
+      } else if (block.type === 'todolist') {
+        (block as any).status = resolvedStatus;
       }
 
       blockMap.set(data.block_index, { ...block });
@@ -225,16 +255,39 @@ export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>
       isStreamingRef.current = false;
       blockMap.clear();
 
-      // Detect real git changes in Electron mode
+      // Detect git changes made DURING this message (delta from baseline)
       const wt = sessionRef.current.worktree;
       const workingDir = (wt && wt !== 'default') ? wt : (projectDir ?? null);
       let hasChanges = false;
       let changeCount = 0;
+      let fileChangesBlock: ContentBlock | null = null;
       if (workingDir) {
         try {
-          const changes = await gitService.changes(workingDir);
-          hasChanges = changes.length > 0;
-          changeCount = changes.length;
+          const allChanges = await gitService.changes(workingDir);
+          const baseline = baselineChangesRef.current;
+          // Only include files that are new or different compared to baseline
+          const deltaChanges = allChanges.filter(c => {
+            const prev = baseline.get(c.path);
+            if (!prev) return true; // new file not in baseline
+            return prev.status !== c.status || prev.additions !== c.additions || prev.deletions !== c.deletions;
+          });
+          hasChanges = deltaChanges.length > 0;
+          changeCount = deltaChanges.length;
+          if (deltaChanges.length > 0) {
+            const statusMap: Record<string, 'new' | 'modified' | 'deleted' | 'renamed'> = {
+              A: 'new', '?': 'new', M: 'modified', D: 'deleted', R: 'renamed',
+            };
+            fileChangesBlock = {
+              type: 'file_changes',
+              title: '文件变更',
+              files: deltaChanges.map(c => ({
+                path: c.path,
+                status: statusMap[c.status] ?? 'modified',
+                additions: c.additions,
+                deletions: c.deletions,
+              })),
+            };
+          }
         } catch {
           // Ignore git errors
         }
@@ -245,9 +298,14 @@ export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>
         status: 'review' as const,
         hasChanges,
         changeCount,
-        messages: sessionRef.current.messages.map(m =>
-          m.id === completedMsgId ? { ...m, content: textContent || m.content } : m
-        ),
+        messages: sessionRef.current.messages.map(m => {
+          if (m.id !== completedMsgId) return m;
+          const updatedMsg = { ...m, content: textContent || m.content };
+          if (fileChangesBlock) {
+            updatedMsg.blocks = [...(m.blocks || []), fileChangesBlock];
+          }
+          return updatedMsg;
+        }),
       };
       sessionRef.current = updated;
       onUpdate(updated);
@@ -356,6 +414,7 @@ export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>
     // Auto-trigger AI response if the session was just created with an initial prompt
     if (session.messages.length === 1 && session.messages[0].role === 'user' && !isStreamingRef.current) {
       const triggerInitialResponse = async () => {
+        await captureGitBaseline();
         const aiMsgId = (Date.now() + 1).toString();
         const initialText = session.messages[0].content;
 
@@ -434,6 +493,7 @@ export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>
       const lastMsg = session.messages[curLen - 1];
       if (lastMsg.role === 'user') {
         const triggerBroadcastResponse = async () => {
+          await captureGitBaseline();
           const aiMsgId = (Date.now() + 1).toString();
           const aiMsg: Message = {
             id: aiMsgId,
@@ -527,6 +587,7 @@ export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>
 
   const sendMessage = async (text: string) => {
     if (!text.trim() || isStreaming) return;
+    await captureGitBaseline();
 
     const userMsg: Message = {
       id: Date.now().toString(),
@@ -658,12 +719,32 @@ export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>
 
   const streamBlockResponse = async (aiMsgId: string, blocks: ContentBlock[]) => {
     const builtBlocks: ContentBlock[] = [];
+    let pendingFlush = false;
+
+    const flushUpdate = () => {
+      pendingFlush = false;
+      const newBlocks = [...builtBlocks];
+      const updated = {
+        ...sessionRef.current,
+        messages: sessionRef.current.messages.map(m =>
+          m.id === aiMsgId ? { ...m, content: (newBlocks.find(b => b.type === 'text') as any)?.content || m.content, blocks: newBlocks } : m
+        )
+      };
+      sessionRef.current = updated;
+      onUpdate(updated);
+    };
+
+    const scheduleFlush = () => {
+      if (!pendingFlush) {
+        pendingFlush = true;
+        requestAnimationFrame(flushUpdate);
+      }
+    };
 
     for (const block of blocks) {
       if (!isStreamingRef.current) break;
 
       if (block.type === 'text') {
-        // Stream text character by character
         let currentText = '';
         const blockIndex = builtBlocks.length;
         builtBlocks.push({ type: 'text', content: '' });
@@ -671,31 +752,15 @@ export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>
         for (const char of block.content) {
           if (!isStreamingRef.current) break;
           currentText += char;
-          // Create new block object for each update so React detects the change
           builtBlocks[blockIndex] = { type: 'text', content: currentText };
-          const newBlocks = [...builtBlocks];
-          const updated = {
-            ...sessionRef.current,
-            messages: sessionRef.current.messages.map(m =>
-              m.id === aiMsgId ? { ...m, content: currentText, blocks: newBlocks } : m
-            )
-          };
-          sessionRef.current = updated;
-          onUpdate(updated);
+          scheduleFlush();
           await new Promise(r => setTimeout(r, 15));
         }
+        // Final flush to ensure last chars are rendered
+        flushUpdate();
       } else {
-        // Non-text blocks appear instantly
         builtBlocks.push(block);
-        const newBlocks = [...builtBlocks];
-        const updated = {
-          ...sessionRef.current,
-          messages: sessionRef.current.messages.map(m =>
-            m.id === aiMsgId ? { ...m, blocks: newBlocks } : m
-          )
-        };
-        sessionRef.current = updated;
-        onUpdate(updated);
+        flushUpdate();
         await new Promise(r => setTimeout(r, 300));
       }
     }
@@ -1259,6 +1324,11 @@ export const SessionWindow = forwardRef<SessionWindowHandle, SessionWindowProps>
               <span>Running...</span>
             </div>
           )}
+          <SessionFilesSummary
+            messages={session.messages}
+            onNavigateToFile={(path) => onOpenFileInPanel?.(path)}
+            onNavigateToDiff={(path) => onOpenDiffInPanel?.(path)}
+          />
         </div>
       </div>
 

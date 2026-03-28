@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { X, RefreshCw, GitBranch, FileDiff, FolderOpen, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChangesTab } from './ChangesTab';
@@ -12,6 +12,9 @@ export interface GitPanelProps {
   isOpen: boolean;
   onClose: () => void;
   onOpenDiff?: (filePath: string) => void;
+  activeTab?: PanelTab | null;
+  selectedFile?: string | null;
+  onTabConsumed?: () => void;
 }
 
 const MIN_WIDTH = 280;
@@ -22,9 +25,18 @@ export function GitPanel({
   isOpen,
   onClose,
   onOpenDiff,
+  activeTab: externalTab,
+  selectedFile: externalFile,
+  onTabConsumed,
 }: GitPanelProps) {
   const [activeTab, setActiveTab] = useState<PanelTab>('changes');
   const [panelWidth, setPanelWidth] = useState(DEFAULT_WIDTH);
+
+  useEffect(() => {
+    if (externalTab) {
+      setActiveTab(externalTab);
+    }
+  }, [externalTab]);
   const { changes, refresh, loading } = useGit();
 
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
@@ -133,9 +145,9 @@ export function GitPanel({
 
           {/* Content */}
           <div className="flex-1 overflow-hidden relative" style={{ minWidth: panelWidth }}>
-            {activeTab === 'changes' && <ChangesTab onOpenDiff={onOpenDiff} />}
+            {activeTab === 'changes' && <ChangesTab onOpenDiff={onOpenDiff} selectedFile={externalTab === 'changes' ? externalFile : null} onFileConsumed={onTabConsumed} />}
             {activeTab === 'git' && <GitTab />}
-            {activeTab === 'files' && <FilesTab />}
+            {activeTab === 'files' && <FilesTab selectedFile={externalTab === 'files' ? externalFile : null} onFileConsumed={onTabConsumed} />}
 
             {/* Loading overlay */}
             <AnimatePresence>

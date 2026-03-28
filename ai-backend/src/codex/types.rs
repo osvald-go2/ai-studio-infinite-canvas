@@ -18,13 +18,13 @@ pub enum CodexEvent {
         item: CodexItem,
     },
 
-    #[serde(rename = "item.completed")]
-    ItemCompleted {
+    #[serde(rename = "item.updated")]
+    ItemUpdated {
         item: CodexItem,
     },
 
-    #[serde(rename = "item.updated")]
-    ItemUpdated {
+    #[serde(rename = "item.completed")]
+    ItemCompleted {
         item: CodexItem,
     },
 
@@ -58,12 +58,12 @@ pub struct CodexItem {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CodexChange {
     pub path: String,
-    pub kind: String,
+    pub kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CodexTodoItem {
-    pub text: String,
+    pub text: Option<String>,
     #[serde(default)]
     pub completed: bool,
 }

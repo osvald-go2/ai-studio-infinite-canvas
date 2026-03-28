@@ -69,11 +69,11 @@ export const STRUCTURED_MOCK_RESPONSES: MockResponse[] = [
         { id: 'q3', question: '是否需要 SSR 支持？', options: ['是，使用 Next.js', '否，纯 SPA'] },
       ]},
       { type: 'file_changes', title: '文件差异', files: [
-        { path: 'src/components/Feature.tsx', status: 'new' },
-        { path: 'src/components/App.tsx', status: 'modified' },
-        { path: 'src/utils/memoHelper.ts', status: 'new' },
-        { path: 'src/types.ts', status: 'modified' },
-        { path: 'src/legacy/OldFeature.tsx', status: 'deleted' },
+        { path: 'src/components/Feature.tsx', status: 'new', additions: 42, deletions: 0 },
+        { path: 'src/components/App.tsx', status: 'modified', additions: 12, deletions: 3 },
+        { path: 'src/utils/memoHelper.ts', status: 'new', additions: 28, deletions: 0 },
+        { path: 'src/types.ts', status: 'modified', additions: 5, deletions: 1 },
+        { path: 'src/legacy/OldFeature.tsx', status: 'deleted', additions: 0, deletions: 45 },
       ]},
       { type: 'text', content: '### 进展总结\n\n已完成核心功能实现：\n\n- **组件创建** — 新建了 Feature 组件\n- **性能优化** — 使用 `React.memo` 减少重渲染\n\n```typescript\nexport const Feature = React.memo(({ data }: Props) => {\n  return <div>{data.title}</div>;\n});\n```\n\n> 等待你的回复后继续下一步。' },
     ]

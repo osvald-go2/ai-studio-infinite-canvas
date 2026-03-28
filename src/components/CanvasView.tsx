@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Session } from '../types';
 import { SessionWindow } from './SessionWindow';
-import { ZoomIn, ZoomOut, Maximize, Hand, MousePointer2, Send, Map, LayoutGrid, Plus, Mic, ArrowUp, Settings2 } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize, Hand, MousePointer2, Send, Map, LayoutGrid, Plus, Mic, ArrowUp, Settings2, Trash2 } from 'lucide-react';
 import { SESSION_WIDTH, SESSION_MIN_WIDTH, SESSION_MAX_WIDTH, SESSION_DEFAULT_HEIGHT, SESSION_MIN_HEIGHT, SESSION_GAP, START_X, START_Y } from '@/constants';
 import { getAgentType } from '../models';
 import { ConnectionLine } from './harness/ConnectionLine';
@@ -26,6 +26,8 @@ export function CanvasView({
   onNewSession,
   harness,
   sessionRefs,
+  onOpenFileInPanel,
+  onOpenDiffInPanel,
 }: {
   sessions: Session[],
   setSessions: any,
@@ -41,6 +43,8 @@ export function CanvasView({
   onNewSession?: () => void,
   harness?: UseHarnessController,
   sessionRefs?: React.RefObject<Map<string, SessionWindowHandle>>,
+  onOpenFileInPanel?: (path: string) => void,
+  onOpenDiffInPanel?: (path: string) => void,
 }) {
   const setTransform = onTransformChange;
   const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
@@ -104,6 +108,22 @@ export function CanvasView({
   selectedIdsRef.current = selectedSessionIds;
   const groupDragInitialPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
 
+  // Delete/Backspace to delete selected sessions
+  const deleteSelectedRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (selectedIdsRef.current.length === 0) return;
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable) return;
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        deleteSelectedRef.current();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const handleGroupDragStart = useCallback(() => {
     const positions: Record<string, { x: number; y: number }> = {};
     for (const s of sessionsRef.current) {
@@ -152,13 +172,16 @@ export function CanvasView({
     const container = containerRef.current;
     if (!container) return;
 
-    const handleNativeWheel = (e: WheelEvent) => {
-      const target = e.target as HTMLElement;
-      const isInsideSession = target.closest('.session-container');
+    let wheelRafId: number | null = null;
+    let pendingWheelEvent: WheelEvent | null = null;
+
+    const processWheel = () => {
+      wheelRafId = null;
+      const e = pendingWheelEvent;
+      if (!e) return;
+      pendingWheelEvent = null;
 
       if (e.ctrlKey || e.metaKey) {
-        if (isInsideSession) return;
-        e.preventDefault();
         const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
         setTransform(prev => {
           const newScale = Math.max(0.1, Math.min(prev.scale * zoomFactor, 3));
@@ -172,8 +195,6 @@ export function CanvasView({
           return { x: newX, y: newY, scale: newScale };
         });
       } else {
-        if (isInsideSession) return;
-        e.preventDefault();
         setTransform(prev => ({
           ...prev,
           x: prev.x - e.deltaX,
@@ -182,8 +203,23 @@ export function CanvasView({
       }
     };
 
+    const handleNativeWheel = (e: WheelEvent) => {
+      const target = e.target as HTMLElement;
+      const isInsideSession = target.closest('.session-container');
+      if (isInsideSession) return;
+      e.preventDefault();
+
+      pendingWheelEvent = e;
+      if (wheelRafId === null) {
+        wheelRafId = requestAnimationFrame(processWheel);
+      }
+    };
+
     container.addEventListener('wheel', handleNativeWheel, { passive: false });
-    return () => container.removeEventListener('wheel', handleNativeWheel);
+    return () => {
+      container.removeEventListener('wheel', handleNativeWheel);
+      if (wheelRafId !== null) cancelAnimationFrame(wheelRafId);
+    };
   }, []);
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -270,6 +306,15 @@ export function CanvasView({
   const handleZoomIn = () => setTransform(p => ({ ...p, scale: Math.min(p.scale * 1.2, 3) }));
   const handleZoomOut = () => setTransform(p => ({ ...p, scale: Math.max(p.scale / 1.2, 0.1) }));
   const handleResetZoom = () => setTransform({ x: 0, y: 0, scale: 1 });
+
+  const handleDeleteSelected = () => {
+    if (selectedSessionIds.length === 0) return;
+    const count = selectedSessionIds.length;
+    if (!window.confirm(`确定要删除选中的 ${count} 个 session 吗？`)) return;
+    setSessions((prev: Session[]) => prev.filter(s => !selectedSessionIds.includes(s.id)));
+    setSelectedSessionIds([]);
+  };
+  deleteSelectedRef.current = handleDeleteSelected;
 
   const handleBroadcast = () => {
     if (!broadcastMessage.trim() || selectedSessionIds.length < 2) return;
@@ -372,7 +417,7 @@ export function CanvasView({
   return (
     <div 
       ref={containerRef}
-      className={`w-full h-full overflow-hidden relative canvas-bg ${toolMode === 'hand' ? (isDraggingCanvas ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-crosshair'}`}
+      className={`w-full h-full overflow-hidden relative canvas-bg ${isDraggingCanvas || connectingFrom || selectionBox ? 'select-none' : ''} ${toolMode === 'hand' ? (isDraggingCanvas ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-crosshair'}`}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -482,6 +527,8 @@ export function CanvasView({
             onAnchorDragStart={handleAnchorDragStart}
             onAnchorDragEnd={handleAnchorDragEnd}
             sessionRefs={sessionRefs}
+            onOpenFileInPanel={onOpenFileInPanel}
+            onOpenDiffInPanel={onOpenDiffInPanel}
           />
         ))}
 
@@ -542,9 +589,19 @@ export function CanvasView({
             <span className="text-xs font-medium text-orange-300/80">
               Broadcasting to {selectedSessionIds.length} sessions
             </span>
-            <button onClick={() => setSelectedSessionIds([])} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
-              Cancel
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleDeleteSelected}
+                className="flex items-center gap-1 text-xs text-red-400/70 hover:text-red-400 transition-colors"
+                title="删除选中的 sessions"
+              >
+                <Trash2 size={12} />
+                Delete
+              </button>
+              <button onClick={() => setSelectedSessionIds([])} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
+                Cancel
+              </button>
+            </div>
           </div>
 
           {/* Textarea */}
@@ -940,7 +997,7 @@ function CanvasMinimap({
   );
 }
 
-function DraggableSession({
+const DraggableSession = React.memo(function DraggableSession({
   session,
   transformScale,
   isFocused,
@@ -962,6 +1019,8 @@ function DraggableSession({
   onAnchorDragStart,
   onAnchorDragEnd,
   sessionRefs,
+  onOpenFileInPanel,
+  onOpenDiffInPanel,
 }: {
   session: Session,
   transformScale: number,
@@ -984,6 +1043,8 @@ function DraggableSession({
   onAnchorDragStart?: (sessionId: string, anchorX: number, anchorY: number) => void,
   onAnchorDragEnd?: (targetSessionId: string) => void,
   sessionRefs?: React.RefObject<Map<string, SessionWindowHandle>>,
+  onOpenFileInPanel?: (path: string) => void,
+  onOpenDiffInPanel?: (path: string) => void,
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
@@ -1080,23 +1141,35 @@ function DraggableSession({
     }
   };
 
+  // Refs for drag/resize handlers to avoid stale closures
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const transformScaleRef = useRef(transformScale);
+  transformScaleRef.current = transformScale;
+  const updateSessionRef = useRef(updateSession);
+  updateSessionRef.current = updateSession;
+  const dragOffsetRef = useRef(dragOffset);
+  dragOffsetRef.current = dragOffset;
+  const onGroupDragMoveRef = useRef(onGroupDragMove);
+  onGroupDragMoveRef.current = onGroupDragMove;
+
   // Drag movement
   useEffect(() => {
+    if (!isDragging) return;
+
     const handleMouseMove = (e: MouseEvent) => {
-      if (isDragging) {
-        if (isGroupDragActiveRef.current) {
-          const deltaX = e.clientX / transformScale - dragStartPointRef.current.x;
-          const deltaY = e.clientY / transformScale - dragStartPointRef.current.y;
-          onGroupDragMove(deltaX, deltaY);
-        } else {
-          updateSession({
-            ...session,
-            position: {
-              x: e.clientX / transformScale - dragOffset.x,
-              y: e.clientY / transformScale - dragOffset.y
-            }
-          });
-        }
+      if (isGroupDragActiveRef.current) {
+        const deltaX = e.clientX / transformScaleRef.current - dragStartPointRef.current.x;
+        const deltaY = e.clientY / transformScaleRef.current - dragStartPointRef.current.y;
+        onGroupDragMoveRef.current(deltaX, deltaY);
+      } else {
+        updateSessionRef.current({
+          ...sessionRef.current,
+          position: {
+            x: e.clientX / transformScaleRef.current - dragOffsetRef.current.x,
+            y: e.clientY / transformScaleRef.current - dragOffsetRef.current.y
+          }
+        });
       }
     };
 
@@ -1105,16 +1178,14 @@ function DraggableSession({
       isGroupDragActiveRef.current = false;
     };
 
-    if (isDragging) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
-    }
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
 
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, dragOffset, session, updateSession, transformScale, onGroupDragMove]);
+  }, [isDragging]);
 
   // Resize handlers
   const handleResizeMouseDown = (e: React.MouseEvent) => {
@@ -1125,13 +1196,18 @@ function DraggableSession({
     setResizeStartHeight(session.height ?? SESSION_DEFAULT_HEIGHT);
   };
 
+  const resizeStartYRef = useRef(resizeStartY);
+  resizeStartYRef.current = resizeStartY;
+  const resizeStartHeightRef = useRef(resizeStartHeight);
+  resizeStartHeightRef.current = resizeStartHeight;
+
   useEffect(() => {
     if (!isResizing) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      const deltaY = e.clientY / transformScale - resizeStartY;
-      const newHeight = Math.max(SESSION_MIN_HEIGHT, resizeStartHeight + deltaY);
-      updateSession({ ...session, height: newHeight });
+      const deltaY = e.clientY / transformScaleRef.current - resizeStartYRef.current;
+      const newHeight = Math.max(SESSION_MIN_HEIGHT, resizeStartHeightRef.current + deltaY);
+      updateSessionRef.current({ ...sessionRef.current, height: newHeight });
     };
 
     const handleMouseUp = () => {
@@ -1145,7 +1221,7 @@ function DraggableSession({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizing, resizeStartY, resizeStartHeight, session, updateSession, transformScale]);
+  }, [isResizing]);
 
   // Horizontal resize handlers
   const handleResizeXMouseDown = (side: 'left' | 'right') => (e: React.MouseEvent) => {
@@ -1157,22 +1233,30 @@ function DraggableSession({
     setResizeStartPosX(session.position.x);
   };
 
+  const resizeStartXRef = useRef(resizeStartX);
+  resizeStartXRef.current = resizeStartX;
+  const resizeStartWidthRef = useRef(resizeStartWidth);
+  resizeStartWidthRef.current = resizeStartWidth;
+  const resizeStartPosXRef = useRef(resizeStartPosX);
+  resizeStartPosXRef.current = resizeStartPosX;
+  const isResizingXRef = useRef(isResizingX);
+  isResizingXRef.current = isResizingX;
+
   useEffect(() => {
     if (!isResizingX) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      const deltaX = e.clientX / transformScale - resizeStartX;
-      if (isResizingX === 'right') {
-        const newWidth = Math.min(SESSION_MAX_WIDTH, Math.max(SESSION_MIN_WIDTH, resizeStartWidth + deltaX));
-        updateSession({ ...session, width: newWidth });
+      const deltaX = e.clientX / transformScaleRef.current - resizeStartXRef.current;
+      if (isResizingXRef.current === 'right') {
+        const newWidth = Math.min(SESSION_MAX_WIDTH, Math.max(SESSION_MIN_WIDTH, resizeStartWidthRef.current + deltaX));
+        updateSessionRef.current({ ...sessionRef.current, width: newWidth });
       } else {
-        // Left side: resize + reposition
-        const newWidth = Math.min(SESSION_MAX_WIDTH, Math.max(SESSION_MIN_WIDTH, resizeStartWidth - deltaX));
-        const actualDelta = resizeStartWidth - newWidth;
-        updateSession({
-          ...session,
+        const newWidth = Math.min(SESSION_MAX_WIDTH, Math.max(SESSION_MIN_WIDTH, resizeStartWidthRef.current - deltaX));
+        const actualDelta = resizeStartWidthRef.current - newWidth;
+        updateSessionRef.current({
+          ...sessionRef.current,
           width: newWidth,
-          position: { ...session.position, x: resizeStartPosX + actualDelta },
+          position: { ...sessionRef.current.position, x: resizeStartPosXRef.current + actualDelta },
         });
       }
     };
@@ -1185,7 +1269,7 @@ function DraggableSession({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizingX, resizeStartX, resizeStartWidth, resizeStartPosX, session, updateSession, transformScale]);
+  }, [isResizingX]);
 
   // Header double-click: toggle collapse/expand
   const handleHeaderDoubleClick = (e: React.MouseEvent) => {
@@ -1210,7 +1294,7 @@ function DraggableSession({
 
   return (
     <div
-      className={`session-container absolute transition-shadow duration-300 ${isFocused ? 'ring-4 ring-blue-500/50 rounded-2xl shadow-2xl shadow-blue-500/20' : ''} ${isSelected ? 'ring-2 ring-blue-400 rounded-2xl shadow-lg shadow-blue-500/20' : ''} ${toolMode === 'hand' ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
+      className={`session-container absolute transition-shadow duration-300 ${isDragging ? 'select-none' : ''} ${isFocused ? 'ring-4 ring-blue-500/50 rounded-2xl shadow-2xl shadow-blue-500/20' : ''} ${isSelected ? 'ring-2 ring-blue-400 rounded-2xl shadow-lg shadow-blue-500/20' : ''} ${toolMode === 'hand' ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
       style={{
         left: session.position.x,
         top: session.position.y,
@@ -1238,6 +1322,8 @@ function DraggableSession({
         projectDir={projectDir}
         onToggleGitPanel={onToggleGitPanel}
         onCopySession={onCopySession}
+        onOpenFileInPanel={onOpenFileInPanel}
+        onOpenDiffInPanel={onOpenDiffInPanel}
       />
       {/* Bottom resize handle */}
       <div
@@ -1306,4 +1392,4 @@ function DraggableSession({
       })()}
     </div>
   );
-}
+});

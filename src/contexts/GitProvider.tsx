@@ -178,12 +178,13 @@ export function GitProvider({ projectDir, overrideDir, children }: GitProviderPr
         setState(prev => ({ ...prev, isRepo: false, loading: false }));
         return;
       }
-      const [info, changes, branches, rawWorktrees, log] = await Promise.all([
+      const [info, changes, branches, rawWorktrees, log, filePaths] = await Promise.all([
         gitService.info(dir).catch(() => defaultInfo),
         gitService.changes(dir).catch(() => [] as FileChange[]),
         gitService.branches(dir).catch(() => [] as BranchInfo[]),
         gitService.worktrees(dir).catch(() => [] as WorktreeInfo[]),
         gitService.log(dir, 50).catch(() => [] as CommitInfo[]),
+        gitService.fileTree(dir).catch(() => [] as string[]),
       ]);
       // Override is_current based on active session's worktree (overrideDir)
       const activeWt = overrideDir || projectDir;
@@ -198,7 +199,7 @@ export function GitProvider({ projectDir, overrideDir, children }: GitProviderPr
         branches,
         worktrees,
         log,
-        fileTree: [],
+        fileTree: buildFileTree(filePaths),
         loading: false,
       });
     } catch {
@@ -232,27 +233,33 @@ export function GitProvider({ projectDir, overrideDir, children }: GitProviderPr
 
     gitService.watch(dir).catch(() => {});
 
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let pendingKinds = new Set<string>();
+
+    const flushPending = () => {
+      debounceTimer = null;
+      const kinds = pendingKinds;
+      pendingKinds = new Set();
+      if (kinds.has('files') || kinds.has('head')) refreshChanges();
+      if (kinds.has('refs')) refreshBranches();
+      if (kinds.has('head')) {
+        refreshInfo();
+        refreshLog();
+      }
+    };
+
     const handler = (data: { dir: string; kind: string }) => {
       if (data.dir !== dirRef.current) return;
-      switch (data.kind) {
-        case 'files':
-          refreshChanges();
-          break;
-        case 'refs':
-          refreshBranches();
-          break;
-        case 'head':
-          refreshInfo();
-          refreshLog();
-          refreshChanges();
-          break;
-      }
+      pendingKinds.add(data.kind);
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(flushPending, 300);
     };
 
     (window as any).aiBackend?.on('git.changed', handler);
 
     return () => {
       (window as any).aiBackend?.off('git.changed', handler);
+      if (debounceTimer) clearTimeout(debounceTimer);
       gitService.unwatch(dir).catch(() => {});
     };
   }, [dir, refreshChanges, refreshBranches, refreshInfo, refreshLog]);
