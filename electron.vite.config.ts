@@ -48,7 +48,7 @@ export default defineConfig(({ mode }) => {
       },
       server: {
         watch: {
-          ignored: ['**/.ai-studio/**', '**/.worktrees/**', '**/worktrees/**', '**/.superpowers/**'],
+          ignored: ['**/.meka-flow/**', '**/.worktrees/**', '**/worktrees/**', '**/.superpowers/**'],
         },
       },
     },

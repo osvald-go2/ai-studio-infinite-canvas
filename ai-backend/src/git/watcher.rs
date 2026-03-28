@@ -15,7 +15,7 @@ fn classify_event(path: &Path, repo_root: &Path) -> Option<&'static str> {
         || rel_str.starts_with("node_modules")
         || rel_str.starts_with("build")
         || rel_str.starts_with("dist")
-        || rel_str.starts_with(".ai-studio")
+        || rel_str.starts_with(".meka-flow")
     {
         return None;
     }

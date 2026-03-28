@@ -412,11 +412,30 @@ pub fn file_tree(dir: &str) -> Result<Vec<String>, String> {
     let has_commits = run_git_unchecked(dir, &["rev-parse", "--verify", "HEAD"])
         .map(|o| o.status.success())
         .unwrap_or(false);
-    if !has_commits {
-        return Ok(Vec::new());
+    if has_commits {
+        let output = run_git(dir, &["ls-tree", "-r", "--name-only", "HEAD"])?;
+        return Ok(output.lines().map(|l| l.to_string()).collect());
     }
-    let output = run_git(dir, &["ls-tree", "-r", "--name-only", "HEAD"])?;
-    Ok(output.lines().map(|l| l.to_string()).collect())
+    // No commits yet — walk the directory, skipping common ignored dirs
+    let root = std::path::Path::new(dir);
+    let mut files = Vec::new();
+    let skip = [".git", "node_modules", "target", "dist", "build", ".ai-studio"];
+    fn walk(base: &std::path::Path, current: &std::path::Path, skip: &[&str], out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(current) else { return };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if skip.contains(&name.as_str()) { continue; }
+            let path = entry.path();
+            if path.is_dir() {
+                walk(base, &path, skip, out);
+            } else if let Ok(rel) = path.strip_prefix(base) {
+                out.push(rel.to_string_lossy().to_string());
+            }
+        }
+    }
+    walk(root, root, &skip, &mut files);
+    files.sort();
+    Ok(files)
 }
 
 /// Read file content from git or working tree

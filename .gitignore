@@ -12,7 +12,7 @@ MuMu/
 # AI tool configs
 .agent/
 .agents/
-.ai-studio/
+.meka-flow/
 .claude/
 .codebuddy/
 .commandcode/
@@ -51,3 +51,10 @@ skills/
 skills-lock.json
 macos-messages-icon.svg
 electron-dynamic-island
+
+# Worktrees & loose assets
+.ai-studio/worktrees/
+meka.svg
+meka_first.svg
+demo.icon/
+ui demo/

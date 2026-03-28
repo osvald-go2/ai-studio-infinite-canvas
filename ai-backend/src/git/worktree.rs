@@ -6,9 +6,9 @@ use super::types::{BranchDiffStats, WorktreeInfo};
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-/// Read base branch from `.ai-studio-meta.json`, fallback to main/master.
+/// Read base branch from `.meka-flow-meta.json`, fallback to main/master.
 fn read_base_branch(dir: &str) -> String {
-    let meta_path = Path::new(dir).join(".ai-studio-meta.json");
+    let meta_path = Path::new(dir).join(".meka-flow-meta.json");
     if let Ok(content) = std::fs::read_to_string(&meta_path) {
         if let Some(start) = content.find("\"baseBranch\"") {
             let rest = &content[start..];
@@ -199,10 +199,10 @@ pub fn create_worktree(project_dir: &str, branch: &str, base: &str) -> Result<St
         }
     }
 
-    // 3. Compute worktree path: .ai-studio/worktrees/<safe_branch>
+    // 3. Compute worktree path: .meka-flow/worktrees/<safe_branch>
     let safe_branch = branch.replace('/', "-");
     let worktrees_dir = Path::new(project_dir)
-        .join(".ai-studio")
+        .join(".meka-flow")
         .join("worktrees");
     std::fs::create_dir_all(&worktrees_dir)
         .map_err(|e| format!("Failed to create worktrees directory: {}", e))?;
@@ -235,17 +235,17 @@ pub fn create_worktree(project_dir: &str, branch: &str, base: &str) -> Result<St
         ));
     }
 
-    // 5. Write .ai-studio-meta.json
-    let meta_path = wt_path.join(".ai-studio-meta.json");
+    // 5. Write .meka-flow-meta.json
+    let meta_path = wt_path.join(".meka-flow-meta.json");
     let meta_content = format!("{{\"baseBranch\":\"{}\"}}", meta_base);
     std::fs::write(&meta_path, &meta_content)
-        .map_err(|e| format!("Failed to write .ai-studio-meta.json: {}", e))?;
+        .map_err(|e| format!("Failed to write .meka-flow-meta.json: {}", e))?;
 
-    // 6. Add .ai-studio-meta.json to .gitignore
+    // 6. Add .meka-flow-meta.json to .gitignore
     let gitignore_path = wt_path.join(".gitignore");
     let needs_entry = if gitignore_path.exists() {
         let content = std::fs::read_to_string(&gitignore_path).unwrap_or_default();
-        !content.lines().any(|l| l.trim() == ".ai-studio-meta.json")
+        !content.lines().any(|l| l.trim() == ".meka-flow-meta.json")
     } else {
         true
     };
@@ -262,7 +262,7 @@ pub fn create_worktree(project_dir: &str, branch: &str, base: &str) -> Result<St
                 writeln!(file).map_err(|e| format!("Failed to write .gitignore: {}", e))?;
             }
         }
-        writeln!(file, ".ai-studio-meta.json")
+        writeln!(file, ".meka-flow-meta.json")
             .map_err(|e| format!("Failed to write .gitignore: {}", e))?;
     }
 

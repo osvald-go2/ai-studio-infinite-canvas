@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { ChevronDown, ChevronRight, ChevronLeft, FileText, FileDiff, Undo2, Loader2 } from 'lucide-react';
 import { FileChange } from '../../types/git';
 import { useGit } from '../../contexts/GitProvider';
@@ -8,6 +8,8 @@ import { CommitGraph } from './CommitGraph';
 
 export interface ChangesTabProps {
   onOpenDiff?: (filePath: string) => void;
+  selectedFile?: string | null;
+  onFileConsumed?: () => void;
 }
 
 // ── Status letter colors ──
@@ -94,7 +96,7 @@ function FileRow({
 }
 
 // ── Main component ──
-export function ChangesTab({ onOpenDiff }: ChangesTabProps) {
+export function ChangesTab({ onOpenDiff, selectedFile: externalFile, onFileConsumed }: ChangesTabProps) {
   const { changes, info, loading, getDiff, discardFile, refresh } = useGit();
   const [changesOpen, setChangesOpen] = useState(true);
   const [graphOpen, setGraphOpen] = useState(true);
@@ -120,6 +122,16 @@ export function ChangesTab({ onOpenDiff }: ChangesTabProps) {
       setDiffLoading(false);
     }
   }, [getDiff]);
+
+  useEffect(() => {
+    if (externalFile) {
+      const change = changes.find(c => c.path === externalFile);
+      if (change) {
+        openDiff(change);
+      }
+      onFileConsumed?.();
+    }
+  }, [externalFile]);
 
   const handleDiscard = useCallback(async (e: React.MouseEvent, change: FileChange) => {
     e.stopPropagation();

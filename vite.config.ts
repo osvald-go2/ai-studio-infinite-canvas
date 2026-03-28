@@ -21,7 +21,7 @@ export default defineConfig(({mode}) => {
     server: {
       hmr: process.env.DISABLE_HMR !== 'true',
       watch: {
-        ignored: ['**/.ai-studio/**', '**/.worktrees/**', '**/worktrees/**', '**/.superpowers/**'],
+        ignored: ['**/.meka-flow/**', '**/.worktrees/**', '**/worktrees/**', '**/.superpowers/**'],
       },
     },
   };

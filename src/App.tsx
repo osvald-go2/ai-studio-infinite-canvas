@@ -136,6 +136,8 @@ export default function App() {
   const [projectDir, setProjectDir] = useState<string | null>(null);
   const [isGitRepo, setIsGitRepo] = useState(false);
   const [showGitPanel, setShowGitPanel] = useState(false);
+  const [gitPanelActiveTab, setGitPanelActiveTab] = useState<'changes' | 'git' | 'files' | null>(null);
+  const [gitPanelSelectedFile, setGitPanelSelectedFile] = useState<string | null>(null);
 
   // Canvas Transform State (lifted from CanvasView)
   const [canvasTransform, setCanvasTransform] = useState({ x: 0, y: 0, scale: 1 });
@@ -157,6 +159,10 @@ export default function App() {
 
   // Ref for focusing the search input in TopBar
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Ref to access latest sessions in event handlers without re-registering
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -189,15 +195,15 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && !isInput && e.key >= '1' && e.key <= '9') {
         e.preventDefault();
         const index = parseInt(e.key) - 1;
-        if (index < sessions.length) {
-          setFocusedSessionId(sessions[index].id);
+        if (index < sessionsRef.current.length) {
+          setFocusedSessionId(sessionsRef.current[index].id);
         }
         return;
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [sessions]);
+  }, []);
 
   // Re-check git repo status when projectDir changes
   useEffect(() => {
@@ -362,9 +368,7 @@ export default function App() {
   }, [sessions, currentProject]);
 
   // Refs to access latest state in before-quit handler
-  const sessionsRef = useRef(sessions);
   const currentProjectRef = useRef(currentProject);
-  sessionsRef.current = sessions;
   currentProjectRef.current = currentProject;
 
   // Flush session saves before app quit
@@ -623,6 +627,18 @@ export default function App() {
     setSessions((prev) => prev.map((s) => s.id === id ? { ...s, ...updates } : s));
   };
 
+  const handleOpenFileInPanel = useCallback((path: string) => {
+    setShowGitPanel(true);
+    setGitPanelActiveTab('files');
+    setGitPanelSelectedFile(path);
+  }, []);
+
+  const handleOpenDiffInPanel = useCallback((path: string) => {
+    setShowGitPanel(true);
+    setGitPanelActiveTab('changes');
+    setGitPanelSelectedFile(path);
+  }, []);
+
   const handleOpenDirectory = async () => {
     if (!isElectronApp) return;
     const aiBackend = (window as any).aiBackend;
@@ -653,7 +669,18 @@ export default function App() {
   // Homepage: show when no project is open
   if (showHomePage) {
     return (
-      <div className="w-screen h-screen overflow-hidden text-white font-sans relative">
+      <div className="w-screen h-screen overflow-hidden bg-black text-white font-sans flex flex-col relative">
+        {/* Atmospheric blurred background */}
+        <div
+          className="absolute inset-0 z-0 bg-cover bg-center transition-all duration-1000"
+          style={{
+            backgroundImage: 'url(https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop)',
+            opacity: 0.4,
+            filter: 'blur(60px) saturate(120%)',
+            transform: 'scale(1.2)'
+          }}
+        />
+        <div className="absolute inset-0 z-0 bg-gradient-to-b from-black/20 to-black/60" />
         <HomePage
           projects={projects}
           onOpenDirectory={handleOpenDirectory}
@@ -716,6 +743,8 @@ export default function App() {
                   onActiveSessionChange={(id) => setActiveSessionId(id)}
                   onClearFocus={() => setFocusedSessionId(null)}
                   onNewSession={() => setIsNewModalOpen(true)}
+                  onOpenFileInPanel={handleOpenFileInPanel}
+                  onOpenDiffInPanel={handleOpenDiffInPanel}
                 />
               ) : viewMode === 'board' ? (
                 <BoardView
@@ -727,6 +756,8 @@ export default function App() {
                   onCopySession={handleCopySession}
                   onActiveSessionChange={(id) => setActiveSessionId(id)}
                   onClearFocus={() => setFocusedSessionId(null)}
+                  onOpenFileInPanel={handleOpenFileInPanel}
+                  onOpenDiffInPanel={handleOpenDiffInPanel}
                 />
               ) : (
                 <TabView
@@ -738,6 +769,8 @@ export default function App() {
                   onCopySession={handleCopySession}
                   onActiveSessionChange={(id) => setActiveSessionId(id)}
                   onClearFocus={() => setFocusedSessionId(null)}
+                  onOpenFileInPanel={handleOpenFileInPanel}
+                  onOpenDiffInPanel={handleOpenDiffInPanel}
                 />
               )}
             </div>
@@ -748,6 +781,9 @@ export default function App() {
                 isOpen={showGitPanel}
                 onClose={() => setShowGitPanel(false)}
                 onOpenDiff={(filePath) => setReviewFilePath(filePath)}
+                activeTab={gitPanelActiveTab}
+                selectedFile={gitPanelSelectedFile}
+                onTabConsumed={() => { setGitPanelActiveTab(null); setGitPanelSelectedFile(null); }}
               />
             )}
           </div>

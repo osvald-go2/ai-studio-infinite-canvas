@@ -117,7 +117,7 @@ export function TopBar({
       >
       <div className="flex items-center gap-4">
         <h1 className="font-semibold text-lg bg-gradient-to-r from-orange-400 to-rose-400 bg-clip-text text-transparent">
-          AI Studio
+          Meka Flow
         </h1>
 
         {/* Project Switcher */}

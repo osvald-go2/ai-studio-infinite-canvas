@@ -28,6 +28,8 @@ export function BoardView({
   onCopySession,
   onActiveSessionChange,
   onClearFocus,
+  onOpenFileInPanel,
+  onOpenDiffInPanel,
 }: {
   sessions: Session[],
   setSessions: any,
@@ -37,6 +39,8 @@ export function BoardView({
   onCopySession?: (title: string) => void,
   onActiveSessionChange?: (id: string | null) => void,
   onClearFocus?: () => void,
+  onOpenFileInPanel?: (path: string) => void,
+  onOpenDiffInPanel?: (path: string) => void,
 }) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [displaySession, setDisplaySession] = useState<Session | null>(null);
@@ -327,6 +331,8 @@ export function BoardView({
                projectDir={projectDir}
                onToggleGitPanel={onToggleGitPanel}
                onCopySession={onCopySession}
+               onOpenFileInPanel={onOpenFileInPanel}
+               onOpenDiffInPanel={onOpenDiffInPanel}
              />
           </div>
         )}
